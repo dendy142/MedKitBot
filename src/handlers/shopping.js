@@ -43,6 +43,8 @@ async function showShoppingList(ctx, page = 0) {
   keyboard.text('➕ Добавить', 'shop:add');
   keyboard.text('🗑 Очистить', 'shop:clear');
   keyboard.row();
+  keyboard.text('📤 Поделиться', 'shop:share');
+  keyboard.row();
   keyboard.text('◀️ Назад', 'main_menu');
 
   if (ctx.callbackQuery) {
@@ -66,6 +68,22 @@ export function registerShoppingHandlers(bot) {
   bot.callbackQuery(/^shop:page:(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await showShoppingList(ctx, parseInt(ctx.match[1]));
+  });
+
+  // Share shopping list as plain text message
+  bot.callbackQuery('shop:share', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const items = await getShoppingList(ctx.dbUser.id);
+    if (items.length === 0) {
+      await ctx.answerCallbackQuery('Список пуст');
+      return;
+    }
+    let text = '🛒 Список покупок:\n\n';
+    for (const item of items) {
+      text += `• ${item.name}\n`;
+    }
+    // Send as new message (can be forwarded)
+    await ctx.reply(text);
   });
 
   // Mark as bought

@@ -25,7 +25,14 @@ async function showSettings(ctx) {
     .row()
     .text('📐 Пороги', 'set:thresh')
     .row()
+    .text('🌅 Периоды дня', 'set:periods')
+    .row()
+    .text('📊 Дайджест', 'set:digest')
+    .row()
     .text('📋 Отображение', 'set:display')
+    .row()
+    .text('📤 Экспорт', 'export')
+    .text('📥 Импорт', 'import')
     .row()
     .text('◀️ Назад', 'main_menu');
 
@@ -194,6 +201,83 @@ export function registerSettingsHandlers(bot) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
+  // --- Day Periods ---
+  bot.callbackQuery('set:periods', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showPeriodsMenu(ctx);
+  });
+
+  bot.callbackQuery(/^set:period:(morning|afternoon|evening|night)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const period = ctx.match[1];
+    const periodLabels = {
+      morning: '🌅 Утро',
+      afternoon: '☀️ День',
+      evening: '🌆 Вечер',
+      night: '🌙 Ночь',
+    };
+
+    const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+    const dp = s.day_periods || DEFAULT_SETTINGS.day_periods;
+    const currentValue = dp[period] || DEFAULT_SETTINGS.day_periods[period];
+
+    // Set state for text input
+    const msg = await ctx.editMessageText(
+      `${periodLabels[period]}\n\nТекущее время: *${currentValue}*\n\nВведите новое время в формате ЧЧ:ММ (например, 08:00):`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:periods'),
+      }
+    );
+
+    await supabase.from('sessions').upsert({
+      key: `state:${ctx.dbUser.id}`,
+      value: {
+        action: 'set_period',
+        period,
+        msgId: msg.message_id,
+      },
+    });
+  });
+
+  // --- Digest Settings ---
+  bot.callbackQuery('set:digest', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showDigestMenu(ctx);
+  });
+
+  bot.callbackQuery('set:digest:toggle', async (ctx) => {
+    const s = { ...(ctx.dbUser.settings || DEFAULT_SETTINGS) };
+    s.digest = { ...(s.digest || DEFAULT_SETTINGS.digest) };
+    s.digest.enabled = !s.digest.enabled;
+    await updateUserSettings(ctx.dbUser.id, s);
+    ctx.dbUser.settings = s;
+    await ctx.answerCallbackQuery(s.digest.enabled ? 'Дайджест включён' : 'Дайджест выключен');
+    await showDigestMenu(ctx);
+  });
+
+  bot.callbackQuery('set:digest:time', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+    const digestTime = s.digest?.time || DEFAULT_SETTINGS.digest.time;
+
+    const msg = await ctx.editMessageText(
+      `🕐 Время дайджеста\n\nТекущее время: *${digestTime}*\n\nВведите новое время в формате ЧЧ:ММ (например, 08:00):`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:digest'),
+      }
+    );
+
+    await supabase.from('sessions').upsert({
+      key: `state:${ctx.dbUser.id}`,
+      value: {
+        action: 'set_digest_time',
+        msgId: msg.message_id,
+      },
+    });
+  });
+
   // --- Display ---
   bot.callbackQuery('set:display', async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -270,4 +354,175 @@ export function registerSettingsHandlers(bot) {
       .text('◀️ Назад', 'settings');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
+}
+
+// --- Helper: show day periods menu ---
+async function showPeriodsMenu(ctx) {
+  const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+  const dp = s.day_periods || DEFAULT_SETTINGS.day_periods;
+
+  const text = `🌅 *Время периодов дня*\n\n` +
+    `🌅 Утро: ${dp.morning}\n` +
+    `☀️ День: ${dp.afternoon}\n` +
+    `🌆 Вечер: ${dp.evening}\n` +
+    `🌙 Ночь: ${dp.night}`;
+
+  const keyboard = new InlineKeyboard()
+    .text('🌅 Утро', 'set:period:morning')
+    .text('☀️ День', 'set:period:afternoon')
+    .row()
+    .text('🌆 Вечер', 'set:period:evening')
+    .text('🌙 Ночь', 'set:period:night')
+    .row()
+    .text('◀️ Назад', 'settings');
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+// --- Helper: show digest menu ---
+async function showDigestMenu(ctx) {
+  const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+  const dg = s.digest || DEFAULT_SETTINGS.digest;
+
+  const text = `📊 *Настройки дайджеста*\n\n` +
+    `Статус: ${dg.enabled ? '✅ Включён' : '❌ Выключен'}\n` +
+    `🕐 Время: ${dg.time || '08:00'}`;
+
+  const keyboard = new InlineKeyboard()
+    .text(dg.enabled ? '🔕 Выключить' : '🔔 Включить', 'set:digest:toggle')
+    .row()
+    .text(`🕐 Время: ${dg.time || '08:00'}`, 'set:digest:time')
+    .row()
+    .text('◀️ Назад', 'settings');
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+/**
+ * Handle text input for settings states (day period, digest time)
+ * Called from textState.js
+ */
+export async function handleSettingsTextState(state, text, ctx) {
+  if (state.action === 'set_period') {
+    const timeMatch = text.match(/^(\d{1,2}):(\d{2})$/);
+    if (!timeMatch) {
+      await ctx.api.editMessageText(ctx.chat.id, state.msgId,
+        '⚠️ Неверный формат. Введите время в формате ЧЧ:ММ (например, 08:00):',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:periods'),
+        }
+      );
+      return 'keep_state';
+    }
+
+    const hours = parseInt(timeMatch[1]);
+    const minutes = parseInt(timeMatch[2]);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      await ctx.api.editMessageText(ctx.chat.id, state.msgId,
+        '⚠️ Некорректное время. Введите время в формате ЧЧ:ММ (например, 08:00):',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:periods'),
+        }
+      );
+      return 'keep_state';
+    }
+
+    const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    const s = { ...(ctx.dbUser.settings || DEFAULT_SETTINGS) };
+    s.day_periods = { ...(s.day_periods || DEFAULT_SETTINGS.day_periods) };
+    s.day_periods[state.period] = timeStr;
+    await updateUserSettings(ctx.dbUser.id, s);
+    ctx.dbUser.settings = s;
+
+    const periodLabels = {
+      morning: '🌅 Утро',
+      afternoon: '☀️ День',
+      evening: '🌆 Вечер',
+      night: '🌙 Ночь',
+    };
+
+    // Show updated periods menu
+    const dp = s.day_periods;
+    const menuText = `🌅 *Время периодов дня*\n\n` +
+      `🌅 Утро: ${dp.morning}\n` +
+      `☀️ День: ${dp.afternoon}\n` +
+      `🌆 Вечер: ${dp.evening}\n` +
+      `🌙 Ночь: ${dp.night}\n\n` +
+      `✅ ${periodLabels[state.period]} обновлено: ${timeStr}`;
+
+    const keyboard = new InlineKeyboard()
+      .text('🌅 Утро', 'set:period:morning')
+      .text('☀️ День', 'set:period:afternoon')
+      .row()
+      .text('🌆 Вечер', 'set:period:evening')
+      .text('🌙 Ночь', 'set:period:night')
+      .row()
+      .text('◀️ Назад', 'settings');
+
+    await ctx.api.editMessageText(ctx.chat.id, state.msgId, menuText, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    });
+
+    return 'handled';
+  }
+
+  if (state.action === 'set_digest_time') {
+    const timeMatch = text.match(/^(\d{1,2}):(\d{2})$/);
+    if (!timeMatch) {
+      await ctx.api.editMessageText(ctx.chat.id, state.msgId,
+        '⚠️ Неверный формат. Введите время в формате ЧЧ:ММ (например, 08:00):',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:digest'),
+        }
+      );
+      return 'keep_state';
+    }
+
+    const hours = parseInt(timeMatch[1]);
+    const minutes = parseInt(timeMatch[2]);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      await ctx.api.editMessageText(ctx.chat.id, state.msgId,
+        '⚠️ Некорректное время. Введите время в формате ЧЧ:ММ (например, 08:00):',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:digest'),
+        }
+      );
+      return 'keep_state';
+    }
+
+    const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    const s = { ...(ctx.dbUser.settings || DEFAULT_SETTINGS) };
+    s.digest = { ...(s.digest || DEFAULT_SETTINGS.digest) };
+    s.digest.time = timeStr;
+    await updateUserSettings(ctx.dbUser.id, s);
+    ctx.dbUser.settings = s;
+
+    // Show updated digest menu
+    const dg = s.digest;
+    const menuText = `📊 *Настройки дайджеста*\n\n` +
+      `Статус: ${dg.enabled ? '✅ Включён' : '❌ Выключен'}\n` +
+      `🕐 Время: ${dg.time}\n\n` +
+      `✅ Время дайджеста обновлено: ${timeStr}`;
+
+    const keyboard = new InlineKeyboard()
+      .text(dg.enabled ? '🔕 Выключить' : '🔔 Включить', 'set:digest:toggle')
+      .row()
+      .text(`🕐 Время: ${dg.time}`, 'set:digest:time')
+      .row()
+      .text('◀️ Назад', 'settings');
+
+    await ctx.api.editMessageText(ctx.chat.id, state.msgId, menuText, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    });
+
+    return 'handled';
+  }
+
+  return null;
 }

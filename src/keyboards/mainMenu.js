@@ -8,5 +8,6 @@ export function mainMenuKeyboard() {
     .text('🛒 Покупки', 'shopping')
     .text('🔍 Поиск', 'search')
     .row()
+    .text('📊 Статистика', 'stats')
     .text('⚙️ Настройки', 'settings');
 }

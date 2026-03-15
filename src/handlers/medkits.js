@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getUserMedkits, getMedkit, createMedkit, renameMedkit, deleteMedkit, countMedkitMedicines } from '../db/queries/medkits.js';
 import { getMedkitMedicines } from '../db/queries/medicines.js';
 import { addPagination, paginateItems } from '../keyboards/pagination.js';
-import { medicineStatusEmoji, formatQuantity, formatExpiry } from '../utils/format.js';
+import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
 import { startAddMedicine } from './addMedicine.js';
 import { supabase } from '../db/supabase.js';
@@ -54,7 +54,7 @@ async function showMedkitList(ctx, page = 0) {
 /**
  * Show single medkit screen with medicines
  */
-async function showMedkit(ctx, medkitId, page = 0) {
+async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } = {}) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit) {
     await ctx.answerCallbackQuery('Аптечка не найдена');
@@ -63,10 +63,22 @@ async function showMedkit(ctx, medkitId, page = 0) {
 
   const settings = ctx.dbUser.settings || {};
   const sortBy = settings.display?.default_sort || 'name';
-  const medicines = await getMedkitMedicines(medkitId, { sortBy });
+  let medicines = await getMedkitMedicines(medkitId, { sortBy });
+
+  // Apply filter if specified
+  if (filterField === 'category' && filterValue) {
+    medicines = medicines.filter(m => m.category === filterValue);
+  } else if (filterField === 'tag' && filterValue) {
+    medicines = medicines.filter(m => m.tags && m.tags.includes(filterValue));
+  }
+
   const pageItems = paginateItems(medicines, page);
 
-  let text = `📦 *${medkit.name}* (${medicines.length})\n\n`;
+  let text = `📦 *${medkit.name}* (${medicines.length})`;
+  if (filterField) {
+    text += `\n🔍 Фильтр: ${filterField === 'category' ? 'категория' : 'тег'} «${filterValue}»`;
+  }
+  text += '\n\n';
 
   for (const med of pageItems) {
     const emoji = medicineStatusEmoji(med, settings.thresholds);
@@ -96,6 +108,7 @@ async function showMedkit(ctx, medkitId, page = 0) {
   keyboard.row();
   keyboard.text('➕ Добавить', `medkit:${medkitId}:add`);
   keyboard.text('🔀 Сортировка', `medkit:${medkitId}:sort`);
+  keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
   keyboard.row();
   keyboard.text('👥 Поделиться', `medkit:${medkitId}:share`);
   keyboard.text('✏️ Редакт.', `medkit:${medkitId}:rename`);
@@ -105,6 +118,32 @@ async function showMedkit(ctx, medkitId, page = 0) {
   keyboard.text('◀️ Назад', 'medkits');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+/**
+ * Sort medicines by problems priority: expired -> expiring soon -> low stock -> rest
+ */
+function sortByProblems(medicines, thresholds) {
+  return [...medicines].sort((a, b) => {
+    const scoreA = problemScore(a, thresholds);
+    const scoreB = problemScore(b, thresholds);
+    return scoreA - scoreB;
+  });
+}
+
+function problemScore(med, thresholds) {
+  const days = daysUntil(med.expiry_date);
+  // Expired — highest priority (lowest score)
+  if (days !== null && days <= 0) return 0;
+  // Expiring soon
+  if (days !== null && days <= (thresholds?.expiry_days || 30)) return 1;
+  // Low stock
+  const lowCount = thresholds?.low_stock_count || 5;
+  const lowPercent = thresholds?.low_stock_percent || 20;
+  if (med.quantity <= lowCount) return 2;
+  if (med.initial_quantity > 0 && (med.quantity / med.initial_quantity) * 100 <= lowPercent) return 2;
+  // Normal
+  return 3;
 }
 
 /**
@@ -219,6 +258,8 @@ export function registerMedkitHandlers(bot) {
           .text('По категории', `medkit:${medkitId}:sort:category`)
           .text('По остатку', `medkit:${medkitId}:sort:quantity`)
           .row()
+          .text('⚠️ Проблемы', `medkit:${medkitId}:sort:problems`)
+          .row()
           .text('◀️ Назад', `medkit:${medkitId}`),
       }
     );
@@ -233,8 +274,17 @@ export function registerMedkitHandlers(bot) {
     const medkit = await getMedkit(medkitId, ctx.dbUser.id);
     if (!medkit) return;
 
-    const medicines = await getMedkitMedicines(medkitId, { sortBy });
     const settings = ctx.dbUser.settings || {};
+
+    let medicines;
+    if (sortBy === 'problems') {
+      // Client-side sorting by problem priority
+      medicines = await getMedkitMedicines(medkitId, { sortBy: 'name' });
+      medicines = sortByProblems(medicines, settings.thresholds);
+    } else {
+      medicines = await getMedkitMedicines(medkitId, { sortBy });
+    }
+
     const pageItems = paginateItems(medicines, 0);
 
     let text = `📦 *${medkit.name}* (${medicines.length})\n\n`;
@@ -256,18 +306,108 @@ export function registerMedkitHandlers(bot) {
     keyboard.row();
     keyboard.text('➕ Добавить', `medkit:${medkitId}:add`);
     keyboard.text('🔀 Сортировка', `medkit:${medkitId}:sort`);
+    keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
     keyboard.row();
     keyboard.text('◀️ Назад', 'medkits');
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
-  // Share, archive — placeholders
-  bot.callbackQuery(/^medkit:([0-9a-f-]+):share$/, async (ctx) => {
-    await ctx.answerCallbackQuery('Скоро! Функция в разработке.');
+  // Filter menu
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):filter$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+
+    await ctx.editMessageText(
+      '📂 *Фильтр*\n\nВыберите тип фильтра:',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text('По категории ▸', `medkit:${medkitId}:filter:cat`)
+          .row()
+          .text('По тегу ▸', `medkit:${medkitId}:filter:tag`)
+          .row()
+          .text('❌ Сбросить', `medkit:${medkitId}`)
+          .row()
+          .text('◀️ Назад', `medkit:${medkitId}`),
+      }
+    );
   });
 
-  bot.callbackQuery(/^medkit:([0-9a-f-]+):archive$/, async (ctx) => {
+  // Filter by category — show category list
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):filter:cat$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    const medicines = await getMedkitMedicines(medkitId);
+
+    const categories = [...new Set(medicines.map(m => m.category).filter(Boolean))].sort();
+
+    if (categories.length === 0) {
+      await ctx.editMessageText(
+        '📂 Нет категорий в этой аптечке.',
+        { reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}:filter`) }
+      );
+      return;
+    }
+
+    const keyboard = new InlineKeyboard();
+    for (const cat of categories) {
+      keyboard.text(cat, `medkit:${medkitId}:fcat:${cat}`).row();
+    }
+    keyboard.text('◀️ Назад', `medkit:${medkitId}:filter`);
+
+    await ctx.editMessageText(
+      '📂 *Фильтр по категории*\n\nВыберите категорию:',
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  });
+
+  // Filter by tag — show tag list
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):filter:tag$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    const medicines = await getMedkitMedicines(medkitId);
+
+    const tags = [...new Set(medicines.flatMap(m => m.tags || []))].sort();
+
+    if (tags.length === 0) {
+      await ctx.editMessageText(
+        '📂 Нет тегов в этой аптечке.',
+        { reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}:filter`) }
+      );
+      return;
+    }
+
+    const keyboard = new InlineKeyboard();
+    for (const tag of tags) {
+      keyboard.text(`#${tag}`, `medkit:${medkitId}:ftag:${tag}`).row();
+    }
+    keyboard.text('◀️ Назад', `medkit:${medkitId}:filter`);
+
+    await ctx.editMessageText(
+      '📂 *Фильтр по тегу*\n\nВыберите тег:',
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  });
+
+  // Apply category filter
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):fcat:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    const category = ctx.match[2];
+    await showMedkit(ctx, medkitId, 0, { filterField: 'category', filterValue: category });
+  });
+
+  // Apply tag filter
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):ftag:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    const tag = ctx.match[2];
+    await showMedkit(ctx, medkitId, 0, { filterField: 'tag', filterValue: tag });
+  });
+
+  // Share placeholder
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):share$/, async (ctx) => {
     await ctx.answerCallbackQuery('Скоро! Функция в разработке.');
   });
 }

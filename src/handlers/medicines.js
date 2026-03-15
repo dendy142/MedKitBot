@@ -1,8 +1,9 @@
 import { InlineKeyboard } from 'grammy';
-import { getMedicine, updateMedicine, archiveMedicine, restoreMedicine, toggleFavorite, getArchivedMedicines } from '../db/queries/medicines.js';
-import { getMedkit } from '../db/queries/medkits.js';
+import { getMedicine, updateMedicine, archiveMedicine, restoreMedicine, toggleFavorite, getArchivedMedicines, createMedicine } from '../db/queries/medicines.js';
+import { getMedkit, getUserMedkits } from '../db/queries/medkits.js';
 import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUntil } from '../utils/format.js';
 import { logAction, logMedicineChange } from '../middleware/logging.js';
+import { getMedicineHistory } from '../db/queries/actionLogs.js';
 import { supabase } from '../db/supabase.js';
 
 /**
@@ -48,12 +49,14 @@ async function showMedicineCard(ctx, medicineId) {
   keyboard.text('➕ Пополнить', `med:${med.id}:restock`);
   keyboard.row();
   keyboard.text('📆 Приём', `med:${med.id}:schedule`);
+  keyboard.text('📂 Копир.', `med:${med.id}:copymove`);
   keyboard.text(med.is_favorite ? '⭐' : '☆', `med:${med.id}:fav`);
   keyboard.row();
   if (med.photo_file_ids && med.photo_file_ids.length > 0) {
     keyboard.text(`📷 Фото (${med.photo_file_ids.length})`, `med:${med.id}:photos`);
-    keyboard.row();
   }
+  keyboard.text('📋 История', `med:${med.id}:history`);
+  keyboard.row();
   keyboard.text('🛒 В покупки', `med:${med.id}:shop`);
   keyboard.text('🗑 В архив', `med:${med.id}:archive`);
   keyboard.row();
@@ -65,6 +68,33 @@ async function showMedicineCard(ctx, medicineId) {
     await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   }
 }
+
+/**
+ * Format a datetime as DD.MM.YYYY HH:MM
+ */
+function formatDateTime(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${day}.${month}.${year} ${hours}:${minutes}`;
+}
+
+/**
+ * Field name mapping for history display
+ */
+const FIELD_LABELS = {
+  name: 'Название',
+  dosage: 'Дозировка',
+  category: 'Категория',
+  quantity: 'Количество',
+  notes: 'Заметки',
+  tags: 'Теги',
+  expiry_date: 'Срок годности',
+};
 
 /**
  * Register all medicine-related callback handlers
@@ -200,6 +230,173 @@ export function registerMedicineHandlers(bot) {
     });
   });
 
+  // Medicine history
+  bot.callbackQuery(/^med:([0-9a-f-]+):history$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const med = await getMedicine(medId);
+    if (!med) return;
+
+    const history = await getMedicineHistory(medId);
+
+    let text = `📋 *История: ${med.name}*\n\n`;
+
+    if (history.length === 0) {
+      text += '_Нет записей об изменениях._\n';
+    } else {
+      for (const entry of history) {
+        const dateStr = formatDateTime(entry.changed_at);
+        const username = entry.users?.username ? `@${entry.users.username}` : (entry.users?.first_name || 'Пользователь');
+        text += `${dateStr} — ${username}\n`;
+
+        const fieldLabel = FIELD_LABELS[entry.field_name] || entry.field_name;
+        const oldVal = entry.old_value === null || entry.old_value === '' ? '(пусто)' : `«${entry.old_value}»`;
+        const newVal = entry.new_value === null || entry.new_value === '' ? '(пусто)' : `«${entry.new_value}»`;
+        text += `  ${fieldLabel}: ${oldVal} → ${newVal}\n\n`;
+      }
+    }
+
+    const keyboard = new InlineKeyboard()
+      .text('◀️ Назад', `med:${medId}`);
+
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  });
+
+  // Copy/Move menu
+  bot.callbackQuery(/^med:([0-9a-f-]+):copymove$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+
+    const keyboard = new InlineKeyboard()
+      .text('📋 Копировать', `med:${medId}:copy`)
+      .text('📦 Переместить', `med:${medId}:move`)
+      .row()
+      .text('◀️ Назад', `med:${medId}`);
+
+    await ctx.editMessageText(
+      '📂 *Копирование / Перемещение*\n\nВыберите действие:',
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  });
+
+  // Copy — show target medkits
+  bot.callbackQuery(/^med:([0-9a-f-]+):copy$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const med = await getMedicine(medId);
+    if (!med) return;
+
+    const medkits = await getUserMedkits(ctx.dbUser.id);
+    const otherMedkits = medkits.filter(mk => mk.id !== med.medkit_id);
+
+    if (otherMedkits.length === 0) {
+      await ctx.editMessageText(
+        '📋 Нет других аптечек для копирования.\n\nСоздайте ещё одну аптечку.',
+        { reply_markup: new InlineKeyboard().text('◀️ Назад', `med:${medId}:copymove`) }
+      );
+      return;
+    }
+
+    const keyboard = new InlineKeyboard();
+    for (const mk of otherMedkits) {
+      keyboard.text(mk.name, `med:${medId}:copy:${mk.id}`).row();
+    }
+    keyboard.text('◀️ Назад', `med:${medId}:copymove`);
+
+    await ctx.editMessageText(
+      `📋 *Копировать «${med.name}»*\n\nВыберите аптечку:`,
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  });
+
+  // Copy — execute
+  bot.callbackQuery(/^med:([0-9a-f-]+):copy:([0-9a-f-]+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const targetMedkitId = ctx.match[2];
+    const med = await getMedicine(medId);
+    if (!med) return;
+
+    const targetMedkit = await getMedkit(targetMedkitId, ctx.dbUser.id);
+    if (!targetMedkit) return;
+
+    await createMedicine({
+      medkitId: targetMedkitId,
+      name: med.name,
+      dosage: med.dosage,
+      category: med.category,
+      tags: med.tags,
+      expiryDate: med.expiry_date,
+      quantity: med.quantity,
+      quantityUnit: med.quantity_unit,
+      photoFileIds: med.photo_file_ids,
+      notes: med.notes,
+    });
+
+    await ctx.editMessageText(
+      `✅ «${med.name}» скопировано в аптечку «${targetMedkit.name}».`,
+      {
+        reply_markup: new InlineKeyboard()
+          .text('◀️ К лекарству', `med:${medId}`)
+          .text('📦 К аптечке', `medkit:${targetMedkitId}`),
+      }
+    );
+  });
+
+  // Move — show target medkits
+  bot.callbackQuery(/^med:([0-9a-f-]+):move$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const med = await getMedicine(medId);
+    if (!med) return;
+
+    const medkits = await getUserMedkits(ctx.dbUser.id);
+    const otherMedkits = medkits.filter(mk => mk.id !== med.medkit_id);
+
+    if (otherMedkits.length === 0) {
+      await ctx.editMessageText(
+        '📦 Нет других аптечек для перемещения.\n\nСоздайте ещё одну аптечку.',
+        { reply_markup: new InlineKeyboard().text('◀️ Назад', `med:${medId}:copymove`) }
+      );
+      return;
+    }
+
+    const keyboard = new InlineKeyboard();
+    for (const mk of otherMedkits) {
+      keyboard.text(mk.name, `med:${medId}:move:${mk.id}`).row();
+    }
+    keyboard.text('◀️ Назад', `med:${medId}:copymove`);
+
+    await ctx.editMessageText(
+      `📦 *Переместить «${med.name}»*\n\nВыберите аптечку:`,
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  });
+
+  // Move — execute
+  bot.callbackQuery(/^med:([0-9a-f-]+):move:([0-9a-f-]+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const targetMedkitId = ctx.match[2];
+    const med = await getMedicine(medId);
+    if (!med) return;
+
+    const sourceMedkitId = med.medkit_id;
+    const targetMedkit = await getMedkit(targetMedkitId, ctx.dbUser.id);
+    if (!targetMedkit) return;
+
+    await updateMedicine(medId, { medkit_id: targetMedkitId });
+
+    await ctx.editMessageText(
+      `✅ «${med.name}» перемещено в аптечку «${targetMedkit.name}».`,
+      {
+        reply_markup: new InlineKeyboard()
+          .text('◀️ К лекарству', `med:${medId}`)
+          .text('📦 К аптечке', `medkit:${targetMedkitId}`),
+      }
+    );
+  });
+
   // View archived medicines
   bot.callbackQuery(/^medkit:([0-9a-f-]+):archive$/, async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -217,11 +414,47 @@ export function registerMedicineHandlers(bot) {
 
     for (const med of archived) {
       text += `🗑 ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n`;
-      keyboard.text(`♻️ ${med.name}`, `med:${med.id}:restore`).row();
+      keyboard
+        .text(`♻️ ${med.name}`, `med:${med.id}:restore`)
+        .text('🗑', `med:${med.id}:permdelete`)
+        .row();
     }
 
     keyboard.text('◀️ Назад', `medkit:${ctx.match[1]}`);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  });
+
+  // Permanent delete — confirm
+  bot.callbackQuery(/^med:([0-9a-f-]+):permdelete$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const med = await getMedicine(medId);
+    if (!med) return;
+
+    await ctx.editMessageText(
+      `🗑 Удалить навсегда «${med.name}»? Это действие нельзя отменить.`,
+      {
+        reply_markup: new InlineKeyboard()
+          .text('✅ Да, удалить', `med:${medId}:permdelete:confirm`)
+          .text('❌ Нет', `medkit:${med.medkit_id}:archive`),
+      }
+    );
+  });
+
+  // Permanent delete — confirmed
+  bot.callbackQuery(/^med:([0-9a-f-]+):permdelete:confirm$/, async (ctx) => {
+    const medId = ctx.match[1];
+    const med = await getMedicine(medId);
+
+    await supabase.from('medicines').delete().eq('id', medId);
+    await logAction(ctx.dbUser.id, 'permanent_delete', 'medicine', medId);
+    await ctx.answerCallbackQuery('Лекарство удалено навсегда');
+
+    if (med) {
+      await ctx.editMessageText('✅ Лекарство удалено навсегда.', {
+        reply_markup: new InlineKeyboard().text('◀️ К архиву', `medkit:${med.medkit_id}:archive`),
+      });
+    }
   });
 
   // Restore from archive
@@ -237,8 +470,5 @@ export function registerMedicineHandlers(bot) {
     }
   });
 
-  // Schedule placeholder
-  bot.callbackQuery(/^med:([0-9a-f-]+):schedule$/, async (ctx) => {
-    await ctx.answerCallbackQuery('Скоро! Функция в разработке.');
-  });
+  // Schedule handler is registered in schedules.js (registerScheduleHandlers)
 }

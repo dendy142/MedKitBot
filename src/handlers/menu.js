@@ -1,6 +1,7 @@
 import { mainMenuKeyboard } from '../keyboards/mainMenu.js';
 import { getUserMedkits } from '../db/queries/medkits.js';
 import { countShoppingItems } from '../db/queries/shoppingList.js';
+import { getTodayIntakeLogs } from '../db/queries/intakeLogs.js';
 import { supabase } from '../db/supabase.js';
 
 /**
@@ -40,8 +41,16 @@ async function buildDashboard(userId, settings) {
     lowStockCount = lowCount || 0;
   }
 
+  // Intake stats for today
+  const intakeLogs = await getTodayIntakeLogs(userId, settings?.timezone || 'Europe/Moscow');
+  const totalIntakes = intakeLogs.length;
+  const doneIntakes = intakeLogs.filter(l => l.status === 'taken').length;
+
   let text = `👋 *Главное меню*\n\n`;
   text += `📦 Аптечек: ${medkitCount}\n`;
+  if (totalIntakes > 0) {
+    text += `💊 Приём: ${doneIntakes}/${totalIntakes} выполнено\n`;
+  }
   if (expiringCount > 0) text += `⚠️ Истекает скоро: ${expiringCount}\n`;
   if (lowStockCount > 0) text += `📉 Заканчивается: ${lowStockCount}\n`;
   if (shopCount > 0) text += `🛒 В списке покупок: ${shopCount}\n`;

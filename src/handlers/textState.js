@@ -5,6 +5,10 @@ import { getMedicine, updateMedicine } from '../db/queries/medicines.js';
 import { addToShoppingList } from '../db/queries/shoppingList.js';
 import { parseDate, formatQuantity } from '../utils/format.js';
 import { logAction, logMedicineChange } from '../middleware/logging.js';
+import { handleShareText } from './sharing.js';
+import { handleScheduleText } from './schedules.js';
+import { markIntakeTaken } from '../db/queries/intakeLogs.js';
+import { handleSettingsTextState } from './settings.js';
 
 async function getState(userId) {
   const { data } = await supabase
@@ -107,6 +111,12 @@ export async function handleTextState(ctx) {
     return true;
   }
 
+  if (state.action === 'share_username') {
+    await clearState(ctx.dbUser.id);
+    await handleShareText(ctx, state);
+    return true;
+  }
+
   if (state.action === 'edit_medicine') {
     await clearState(ctx.dbUser.id);
     const med = await getMedicine(state.medId);
@@ -156,6 +166,45 @@ export async function handleTextState(ctx) {
       new InlineKeyboard().text('◀️ К лекарству', `med:${state.medId}`)
     );
     return true;
+  }
+
+  // Schedule creation wizard (time, dose, days, date input)
+  if (state.action === 'create_schedule') {
+    // Re-add deleted message context for the handler
+    const handled = await handleScheduleText(ctx);
+    return handled;
+  }
+
+  // Intake note
+  if (state.action === 'intake_note') {
+    await clearState(ctx.dbUser.id);
+    try {
+      await markIntakeTaken(state.logId, text);
+      await editBotMsg(ctx, msgId,
+        `✅ Приём отмечен с заметкой: _${text}_`,
+        new InlineKeyboard().text('💊 К приёмам', 'intake_today').text('◀️ Меню', 'main_menu')
+      );
+    } catch (e) {
+      console.error('Error adding intake note:', e);
+      await editBotMsg(ctx, msgId,
+        '❌ Ошибка при сохранении заметки.',
+        new InlineKeyboard().text('💊 К приёмам', 'intake_today')
+      );
+    }
+    return true;
+  }
+
+  // Settings text states (day periods, digest time)
+  if (state.action === 'set_period' || state.action === 'set_digest_time') {
+    const result = await handleSettingsTextState(state, text, ctx);
+    if (result === 'keep_state') {
+      // Don't clear state — user needs to retry
+      return true;
+    }
+    if (result === 'handled') {
+      await clearState(ctx.dbUser.id);
+      return true;
+    }
   }
 
   return false;

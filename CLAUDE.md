@@ -12,7 +12,7 @@ Telegram bot @my_med_kit_bot for managing home medicine cabinets. Russian-only i
 - **Bot framework**: grammY (Telegram Bot API)
 - **Database**: Supabase PostgreSQL (service role key, no RLS enforcement)
 - **Hosting**: Vercel serverless (webhook at `api/webhook.js`)
-- **Cron**: Vercel Cron Jobs (`api/cron/expiry-check.js` daily at 6am)
+- **Cron**: Vercel Cron Jobs (`api/cron/expiry-check.js` daily at 6am, `api/cron/reminders.js` every 5 min, `api/cron/digest.js` hourly)
 
 ## Commands
 
@@ -31,12 +31,12 @@ Telegram → Vercel webhook (`api/webhook.js`) → `bot.handleUpdate(update)` �
 ### State management
 Stateful multi-step flows (add medicine, create medkit, rename, restock, edit) use the Supabase `sessions` table as a key-value store:
 - `addmed:{userId}` — 8-step medicine addition wizard (managed in `src/handlers/addMedicine.js`)
-- `state:{userId}` — simpler text-input flows like create/rename medkit, restock, edit field, add shopping item (managed in `src/handlers/textState.js`)
+- `state:{userId}` — simpler text-input flows like create/rename medkit, restock, edit field, add shopping item, create schedule, share username, settings (managed in `src/handlers/textState.js`)
 
 Each state stores a `msgId` to edit the same bot message across steps. User messages are deleted after processing.
 
 ### Handler registration order (in bot.js)
-Commands → noop/help/intake callbacks → onboarding → addMedicine callbacks (`/^addmed:/`) → medkits → medicines → settings → shopping → search → photo handler → text handler (addMedicine → textState → search fallback)
+Commands → noop/help → intake/schedule → onboarding → addMedicine callbacks (`/^addmed:/`) → sharing → medkits → medicines → settings → export/import → shopping → stats → search → document handler → photo handler → text handler (addMedicine → textState → search fallback)
 
 Order matters: more specific regex patterns must register before broader ones.
 
@@ -56,8 +56,6 @@ All DB access goes through `src/db/queries/*.js` files. Direct `supabase` client
 - Settings stored as JSONB in users.settings (see DEFAULT_SETTINGS in config.js)
 - Pagination: 8 items per page via `src/keyboards/pagination.js`
 - Callback data format: `entity:id:action` (e.g., `medkit:uuid:rename`, `med:uuid:edit:name`)
-- Spec document: `start.md` contains the full product specification
-
 ## Environment variables
 
 `BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `CRON_SECRET`

@@ -1,0 +1,23 @@
+{
+  "name": "medkit-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for managing home medicine cabinets",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "node api/webhook.js"
+  },
+  "dependencies": {
+    "@grammyjs/conversations": "^2.0.3",
+    "@grammyjs/runner": "^2.0.3",
+    "@supabase/supabase-js": "^2.49.4",
+    "csv-parse": "^5.6.0",
+    "csv-stringify": "^6.6.0",
+    "dotenv": "^17.3.1",
+    "grammy": "^1.35.0",
+    "pdfkit": "^0.16.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

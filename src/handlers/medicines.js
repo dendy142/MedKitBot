@@ -1,7 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { getMedicine, updateMedicine, archiveMedicine, restoreMedicine, toggleFavorite, getArchivedMedicines, createMedicine } from '../db/queries/medicines.js';
 import { getMedkit, getUserMedkits } from '../db/queries/medkits.js';
-import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUntil, formatProgressBar } from '../utils/format.js';
+import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUntil, formatProgressBar, getDaysWord } from '../utils/format.js';
 import { paginateItems, addPagination } from '../keyboards/pagination.js';
 import { logAction, logMedicineChange } from '../middleware/logging.js';
 import { getMedicineHistory } from '../db/queries/actionLogs.js';
@@ -27,7 +27,7 @@ async function showMedicineCard(ctx, medicineId) {
     statusLabel = ' — _просрочено_';
   } else if (statusEmoji === '⚠️') {
     const days = daysUntil(med.expiry_date);
-    statusLabel = ` — _истекает через ${days} дн._`;
+    statusLabel = ` — _истекает через ${days} ${getDaysWord(days)}_`;
   } else if (statusEmoji === '📉') {
     statusLabel = ' — _мало остатка_';
   }

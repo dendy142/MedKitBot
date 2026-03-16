@@ -3,12 +3,21 @@ import { searchMedicines } from '../db/queries/medicines.js';
 import { getUserMedkits } from '../db/queries/medkits.js';
 import { formatQuantity, medicineStatusEmoji } from '../utils/format.js';
 import { startAddMedicine } from './addMedicine.js';
+import { supabase } from '../db/supabase.js';
 
 /**
  * Callback: user pressed 🔍 Поиск
+ * Stores search state so subsequent text input edits this message instead of creating new ones.
  */
 export async function handleSearchCallback(ctx) {
   await ctx.answerCallbackQuery();
+
+  const msgId = ctx.callbackQuery.message.message_id;
+  await supabase.from('sessions').upsert(
+    { key: `state:${ctx.dbUser.id}`, value: { action: 'search', msgId }, updated_at: new Date().toISOString() },
+    { onConflict: 'key' }
+  );
+
   await ctx.editMessageText(
     '🔍 *Поиск лекарства*\n\nВведите название лекарства:',
     {
@@ -19,11 +28,39 @@ export async function handleSearchCallback(ctx) {
 }
 
 /**
- * Fallback handler: user typed text → try to search
+ * Helper: send or edit search results
+ */
+async function sendSearchResult(ctx, text, keyboard, searchState) {
+  const opts = { parse_mode: 'Markdown', reply_markup: keyboard };
+  if (searchState?.msgId) {
+    try {
+      await ctx.api.editMessageText(ctx.chat.id, searchState.msgId, text, opts);
+      return;
+    } catch { /* message might be deleted — fall through to reply */ }
+  }
+  await ctx.reply(text, opts);
+}
+
+/**
+ * Fallback handler: user typed text → try to search.
+ * If triggered after 🔍 button (search state exists), edits the bot message in-place.
  */
 export async function handleSearch(ctx) {
   const query = ctx.message.text.trim();
   if (!query || query.startsWith('/')) return;
+
+  // Check for search state (set by handleSearchCallback)
+  const { data: stateData } = await supabase
+    .from('sessions')
+    .select('value')
+    .eq('key', `state:${ctx.dbUser.id}`)
+    .single();
+  const searchState = stateData?.value?.action === 'search' ? stateData.value : null;
+
+  // Delete user's typed message to keep chat clean
+  if (searchState) {
+    try { await ctx.deleteMessage(); } catch { /* ignore */ }
+  }
 
   const results = await searchMedicines(ctx.dbUser.id, query);
 
@@ -45,9 +82,9 @@ export async function handleSearch(ctx) {
       .row()
       .text('🏠 Меню', 'main_menu');
 
-    await ctx.reply(
+    await sendSearchResult(ctx,
       `🔍 По запросу «${query}» ничего не найдено.\n\nПопробуйте другой запрос.`,
-      { reply_markup: keyboard }
+      keyboard, searchState
     );
     return;
   }
@@ -80,10 +117,7 @@ export async function handleSearch(ctx) {
   keyboard.text('🔍 Искать ещё', 'search').row();
   keyboard.text('🏠 Меню', 'main_menu');
 
-  await ctx.reply(text, {
-    parse_mode: 'Markdown',
-    reply_markup: keyboard,
-  });
+  await sendSearchResult(ctx, text, keyboard, searchState);
 }
 
 /**

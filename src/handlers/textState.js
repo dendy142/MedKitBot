@@ -53,6 +53,9 @@ export async function handleTextState(ctx) {
   const state = await getState(ctx.dbUser.id);
   if (!state) return false;
 
+  // Search state is handled by the search fallback handler, not here
+  if (state.action === 'search') return false;
+
   const text = ctx.message.text.trim();
   if (!text || text.startsWith('/')) return false;
 

@@ -77,6 +77,13 @@ async function buildTodayView(userId, timezone) {
           .row();
       }
     }
+
+    // P1.5: "Take All" button if 2+ pending in this time slot
+    const pendingInSlot = byTime[time].filter(l => l.status === 'pending' || l.status === 'snoozed');
+    if (pendingInSlot.length >= 2) {
+      keyboard.text(`✅ Принять все в ${time}`, `intake:takeall:${time}`).row();
+    }
+
     text += '\n';
   }
 
@@ -138,6 +145,47 @@ export function registerIntakeHandlers(bot) {
 
     // Re-render today view
     const timezone = ctx.dbUser.timezone || 'Europe/Moscow';
+    const { text, keyboard } = await buildTodayView(ctx.dbUser.id, timezone);
+    await ctx.editMessageText(text, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    });
+  });
+
+  // P1.5: Take all in a time slot
+  bot.callbackQuery(/^intake:takeall:(.+)$/, async (ctx) => {
+    const timeSlot = ctx.match[1];
+    const timezone = ctx.dbUser.timezone || 'Europe/Moscow';
+    const logs = await getTodayIntakeLogs(ctx.dbUser.id, timezone);
+
+    // Find pending/snoozed logs matching this time slot
+    const pending = logs.filter(l => {
+      const t = formatTime(l.planned_at, timezone);
+      return t === timeSlot && (l.status === 'pending' || l.status === 'snoozed');
+    });
+
+    let taken = 0;
+    for (const log of pending) {
+      try {
+        await markIntakeTaken(log.id);
+        // Subtract dose from medicine quantity
+        if (log.medicine_id) {
+          const med = await getMedicine(log.medicine_id);
+          if (med) {
+            const dose = log.schedules?.dose_per_intake || 1;
+            const newQty = Math.max(0, med.quantity - dose);
+            await updateMedicine(log.medicine_id, { quantity: newQty });
+          }
+        }
+        taken++;
+      } catch (e) {
+        console.error('Error in takeall:', e);
+      }
+    }
+
+    await ctx.answerCallbackQuery(`✅ Принято: ${taken}`);
+
+    // Re-render today view
     const { text, keyboard } = await buildTodayView(ctx.dbUser.id, timezone);
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',

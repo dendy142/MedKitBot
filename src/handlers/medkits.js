@@ -4,7 +4,7 @@ import { getMedkitMedicines } from '../db/queries/medicines.js';
 import { addPagination, paginateItems } from '../keyboards/pagination.js';
 import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
-import { startAddMedicine } from './addMedicine.js';
+import { startAddMedicine, startQuickAdd } from './addMedicine.js';
 import { supabase } from '../db/supabase.js';
 
 /**
@@ -71,7 +71,10 @@ function buildMedkitKeyboard(medkitId, pageItems, page, totalItems) {
   addPagination(keyboard, page, totalItems, `mk:${medkitId}`);
 
   keyboard.row();
+  // P1.1: Quick Add + full Add
+  keyboard.text('⚡ Быстро', `medkit:${medkitId}:quickadd`);
   keyboard.text('➕ Добавить', `medkit:${medkitId}:add`);
+  keyboard.row();
   keyboard.text('🔀 Сорт.', `medkit:${medkitId}:sort`);
   keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
   keyboard.row();
@@ -117,13 +120,17 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
     medicines = medicines.filter(m => m.category === filterValue);
   } else if (filterField === 'tag' && filterValue) {
     medicines = medicines.filter(m => m.tags && m.tags.includes(filterValue));
+  } else if (filterField === 'favorite') {
+    // P2.5: Filter by favorites
+    medicines = medicines.filter(m => m.is_favorite);
   }
 
   const pageItems = paginateItems(medicines, page);
 
   let text = `📦 *${medkit.name}* (${medicines.length})`;
   if (filterField) {
-    text += `\n🔍 Фильтр: ${filterField === 'category' ? 'категория' : 'тег'} «${filterValue}»`;
+    const filterLabels = { category: 'категория', tag: 'тег', favorite: '⭐ избранное' };
+    text += `\n🔍 Фильтр: ${filterLabels[filterField] || filterField}${filterField !== 'favorite' ? ` «${filterValue}»` : ''}`;
   }
   text += '\n\n';
 
@@ -223,6 +230,12 @@ export function registerMedkitHandlers(bot) {
     await showMedkit(ctx, ctx.match[1], parseInt(ctx.match[2]));
   });
 
+  // P1.1: Quick add medicine
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):quickadd$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await startQuickAdd(ctx, ctx.match[1]);
+  });
+
   // Add medicine to medkit
   bot.callbackQuery(/^medkit:([0-9a-f-]+):add$/, async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -242,6 +255,7 @@ export function registerMedkitHandlers(bot) {
     const medkit = await getMedkit(medkitId, ctx.dbUser.id);
     if (!medkit) return;
 
+    // P2.3: Export/Import accessible from medkit manage menu
     await ctx.editMessageText(
       `⚙️ *Управление: ${medkit.name}*`,
       {
@@ -249,6 +263,9 @@ export function registerMedkitHandlers(bot) {
         reply_markup: new InlineKeyboard()
           .text('👥 Поделиться', `medkit:${medkitId}:share`)
           .text('✏️ Переименовать', `medkit:${medkitId}:rename`)
+          .row()
+          .text('📤 Экспорт', `export:${medkitId}`)
+          .text('📥 Импорт', 'import')
           .row()
           .text('🗃 Архив', `medkit:${medkitId}:archive`)
           .text('🗑 Удалить', `medkit:${medkitId}:delete`)
@@ -274,21 +291,25 @@ export function registerMedkitHandlers(bot) {
     );
   });
 
-  // Delete medkit — confirm
+  // Delete medkit — confirm (P2.2: contextual info)
   bot.callbackQuery(/^medkit:([0-9a-f-]+):delete$/, async (ctx) => {
     await ctx.answerCallbackQuery();
-    const medkit = await getMedkit(ctx.match[1], ctx.dbUser.id);
+    const medkitId = ctx.match[1];
+    const medkit = await getMedkit(medkitId, ctx.dbUser.id);
     if (!medkit) return;
 
-    await ctx.editMessageText(
-      `🗑 Вы уверены, что хотите удалить аптечку «${medkit.name}»?\n\n⚠️ Все лекарства в ней будут удалены!`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard()
-          .text('✅ Да, удалить', `medkit:${ctx.match[1]}:delete:confirm`)
-          .text('❌ Нет', `medkit:${ctx.match[1]}:manage`),
-      }
-    );
+    const medicines = await getMedkitMedicines(medkitId);
+    const medCount = medicines.length;
+    let warning = `🗑 Вы уверены, что хотите удалить аптечку «${medkit.name}»?\n\n`;
+    warning += `⚠️ Будет удалено: ${medCount} лекарств${medCount === 1 ? 'о' : medCount < 5 ? 'а' : ''}`;
+    warning += `, а также все связанные расписания и логи приёма.`;
+
+    await ctx.editMessageText(warning, {
+      parse_mode: 'Markdown',
+      reply_markup: new InlineKeyboard()
+        .text('✅ Да, удалить', `medkit:${medkitId}:delete:confirm`)
+        .text('❌ Нет', `medkit:${medkitId}:manage`),
+    });
   });
 
   // Delete medkit — confirmed
@@ -353,11 +374,14 @@ export function registerMedkitHandlers(bot) {
     await ctx.answerCallbackQuery();
     const medkitId = ctx.match[1];
 
+    // P2.5: Added favorite filter
     await ctx.editMessageText(
       '📂 *Фильтр*\n\nВыберите тип фильтра:',
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
+          .text('⭐ Избранное', `medkit:${medkitId}:filter:fav`)
+          .row()
           .text('По категории ▸', `medkit:${medkitId}:filter:cat`)
           .row()
           .text('По тегу ▸', `medkit:${medkitId}:filter:tag`)
@@ -421,6 +445,12 @@ export function registerMedkitHandlers(bot) {
       '📂 *Фильтр по тегу*\n\nВыберите тег:',
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
+  });
+
+  // P2.5: Apply favorite filter
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):filter:fav$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showMedkit(ctx, ctx.match[1], 0, { filterField: 'favorite', filterValue: true });
   });
 
   // Apply category filter

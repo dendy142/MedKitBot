@@ -10,13 +10,21 @@ import { handleScheduleText } from './schedules.js';
 import { markIntakeTaken } from '../db/queries/intakeLogs.js';
 import { handleSettingsTextState } from './settings.js';
 
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
 async function getState(userId) {
   const { data } = await supabase
     .from('sessions')
-    .select('value')
+    .select('value, updated_at')
     .eq('key', `state:${userId}`)
     .single();
-  return data?.value ?? null;
+  if (!data?.value) return null;
+  // P2.7: Auto-clear stale sessions
+  if (data.updated_at && (Date.now() - new Date(data.updated_at).getTime()) > SESSION_TTL_MS) {
+    await clearState(userId);
+    return null;
+  }
+  return data.value;
 }
 
 async function clearState(userId) {
@@ -48,10 +56,21 @@ export async function handleTextState(ctx) {
   const text = ctx.message.text.trim();
   if (!text || text.startsWith('/')) return false;
 
+  // P0.4: Clear any conflicting addmed session when processing state-based input
+  await supabase.from('sessions').delete().eq('key', `addmed:${ctx.dbUser.id}`);
+
   await deleteUserMsg(ctx);
   const msgId = state.msgId;
 
   if (state.action === 'create_medkit') {
+    // P0.3: Validate medkit name length
+    if (text.length > 50) {
+      await editBotMsg(ctx, msgId,
+        '⚠️ Слишком длинное название (макс. 50 символов). Попробуйте ещё раз:',
+        new InlineKeyboard().text('❌ Отмена', 'medkits')
+      );
+      return true;
+    }
     await clearState(ctx.dbUser.id);
     const medkit = await createMedkit(text, ctx.dbUser.id);
     await logAction(ctx.dbUser.id, 'create', 'medkit', medkit.id, { name: text });
@@ -65,6 +84,14 @@ export async function handleTextState(ctx) {
   }
 
   if (state.action === 'rename_medkit') {
+    // P0.3: Validate medkit name length
+    if (text.length > 50) {
+      await editBotMsg(ctx, msgId,
+        '⚠️ Слишком длинное название (макс. 50 символов). Попробуйте ещё раз:',
+        new InlineKeyboard().text('❌ Отмена', `medkit:${state.medkitId}`)
+      );
+      return true;
+    }
     await clearState(ctx.dbUser.id);
     await renameMedkit(state.medkitId, text);
     await logAction(ctx.dbUser.id, 'rename', 'medkit', state.medkitId, { name: text });
@@ -76,19 +103,25 @@ export async function handleTextState(ctx) {
   }
 
   if (state.action === 'restock') {
-    await clearState(ctx.dbUser.id);
     const num = parseFloat(text);
     const med = await getMedicine(state.medId);
-    if (!med) return true;
+    if (!med) { await clearState(ctx.dbUser.id); return true; }
 
+    // P0.1: Validate BEFORE clearing state so user can retry
     if (isNaN(num) || num <= 0) {
       await editBotMsg(ctx, msgId,
-        '⚠️ Некорректное число.',
-        new InlineKeyboard().text('◀️ Назад', `med:${state.medId}`)
+        '⚠️ Введите положительное число. Попробуйте ещё раз:',
+        new InlineKeyboard()
+          .text('+1', `med:${state.medId}:restock:1`)
+          .text('+5', `med:${state.medId}:restock:5`)
+          .text('+10', `med:${state.medId}:restock:10`)
+          .row()
+          .text('❌ Отмена', `med:${state.medId}`)
       );
       return true;
     }
 
+    await clearState(ctx.dbUser.id);
     const newQty = med.quantity + num;
     await updateMedicine(state.medId, { quantity: newQty });
     await logMedicineChange(state.medId, ctx.dbUser.id, 'quantity', med.quantity, newQty);
@@ -100,6 +133,14 @@ export async function handleTextState(ctx) {
   }
 
   if (state.action === 'shop_add') {
+    // P2.1: Validate shopping item name length
+    if (text.length > 100) {
+      await editBotMsg(ctx, msgId,
+        '⚠️ Слишком длинное название (макс. 100 символов). Попробуйте ещё раз:',
+        new InlineKeyboard().text('❌ Отмена', 'shopping')
+      );
+      return true;
+    }
     await clearState(ctx.dbUser.id);
     await addToShoppingList(ctx.dbUser.id, text);
     await editBotMsg(ctx, msgId,
@@ -118,28 +159,63 @@ export async function handleTextState(ctx) {
   }
 
   if (state.action === 'edit_medicine') {
-    await clearState(ctx.dbUser.id);
     const med = await getMedicine(state.medId);
-    if (!med) return true;
+    if (!med) { await clearState(ctx.dbUser.id); return true; }
 
     const field = state.field;
     let updateData = {};
     let newValue = text;
 
-    if (field === 'name') updateData.name = text;
-    else if (field === 'dosage') updateData.dosage = text;
-    else if (field === 'category') updateData.category = text;
-    else if (field === 'notes') updateData.notes = text;
+    // P2.1: Validate field lengths
+    if (field === 'name') {
+      if (text.length > 100) {
+        await editBotMsg(ctx, msgId, '⚠️ Слишком длинное название (макс. 100 символов). Попробуйте ещё раз:',
+          new InlineKeyboard().text('❌ Отмена', `med:${state.medId}:edit`));
+        return true;
+      }
+      updateData.name = text;
+    }
+    else if (field === 'dosage') {
+      if (text.length > 50) {
+        await editBotMsg(ctx, msgId, '⚠️ Слишком длинная дозировка (макс. 50 символов). Попробуйте ещё раз:',
+          new InlineKeyboard().text('❌ Отмена', `med:${state.medId}:edit`));
+        return true;
+      }
+      updateData.dosage = text;
+    }
+    else if (field === 'category') {
+      if (text.length > 50) {
+        await editBotMsg(ctx, msgId, '⚠️ Слишком длинная категория (макс. 50 символов). Попробуйте ещё раз:',
+          new InlineKeyboard().text('❌ Отмена', `med:${state.medId}:edit`));
+        return true;
+      }
+      updateData.category = text;
+    }
+    else if (field === 'notes') {
+      if (text.length > 500) {
+        await editBotMsg(ctx, msgId, '⚠️ Слишком длинная заметка (макс. 500 символов). Попробуйте ещё раз:',
+          new InlineKeyboard().text('❌ Отмена', `med:${state.medId}:edit`));
+        return true;
+      }
+      updateData.notes = text;
+    }
     else if (field === 'tags') {
-      updateData.tags = text.split(',').map(t => t.trim()).filter(t => t.length > 0);
+      // P2.4: Deduplicate tags
+      updateData.tags = text.split(',').map(t => t.trim()).filter((t, i, arr) => t.length > 0 && arr.indexOf(t) === i);
+      if (updateData.tags.length > 10) {
+        await editBotMsg(ctx, msgId, '⚠️ Слишком много тегов (макс. 10). Попробуйте ещё раз:',
+          new InlineKeyboard().text('❌ Отмена', `med:${state.medId}:edit`));
+        return true;
+      }
       newValue = updateData.tags;
     }
     else if (field === 'expiry') {
       const parsed = parseDate(text);
+      // P0.1: Don't clear state on validation failure — user can retry
       if (!parsed) {
         await editBotMsg(ctx, msgId,
-          '⚠️ Не удалось распознать дату.',
-          new InlineKeyboard().text('◀️ Назад', `med:${state.medId}:edit`)
+          '⚠️ Не удалось распознать дату. Введите в формате ДД.ММ.ГГГГ или ММ.ГГГГ:',
+          new InlineKeyboard().text('❌ Отмена', `med:${state.medId}:edit`)
         );
         return true;
       }
@@ -148,10 +224,11 @@ export async function handleTextState(ctx) {
     }
     else if (field === 'quantity') {
       const num = parseFloat(text);
+      // P0.1: Don't clear state on validation failure — user can retry
       if (isNaN(num) || num < 0) {
         await editBotMsg(ctx, msgId,
-          '⚠️ Некорректное число.',
-          new InlineKeyboard().text('◀️ Назад', `med:${state.medId}:edit`)
+          '⚠️ Введите число ≥ 0. Попробуйте ещё раз:',
+          new InlineKeyboard().text('❌ Отмена', `med:${state.medId}:edit`)
         );
         return true;
       }
@@ -159,6 +236,8 @@ export async function handleTextState(ctx) {
       newValue = num;
     }
 
+    // Clear state only after successful validation
+    await clearState(ctx.dbUser.id);
     await updateMedicine(state.medId, updateData);
     await logMedicineChange(state.medId, ctx.dbUser.id, field, med[field], newValue);
     await editBotMsg(ctx, msgId,

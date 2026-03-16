@@ -2,7 +2,18 @@ import { InlineKeyboard } from 'grammy';
 import { createSchedule, getMedicineSchedules, getSchedule, updateScheduleStatus, deleteSchedule } from '../db/queries/schedules.js';
 import { getMedicine } from '../db/queries/medicines.js';
 import { supabase } from '../db/supabase.js';
-import { formatQuantity, getDaysWord } from '../utils/format.js';
+import { formatQuantity, getDaysWord, formatProgressBar } from '../utils/format.js';
+
+// P3.4: Schedule wizard step labels and progress
+const SCHED_STEPS = ['time', 'dose', 'frequency', 'duration', 'confirm'];
+const SCHED_STEP_LABELS = { time: 'Время', dose: 'Доза', frequency: 'Частота', duration: 'Длительность', confirm: 'Подтверждение' };
+
+function schedStageHeader(stepName) {
+  const idx = SCHED_STEPS.indexOf(stepName);
+  if (idx < 0) return '';
+  const bar = formatProgressBar(idx + 1, SCHED_STEPS.length, 10);
+  return `📆 *Курс приёма*\n${bar} ${SCHED_STEP_LABELS[stepName] || ''}`;
+}
 
 /**
  * Day of week labels (Russian, short)
@@ -284,6 +295,7 @@ export async function handleScheduleText(ctx) {
     const newState = { ...state, step: 'frequency', dosePerIntake: num };
     await saveWizardState(ctx.dbUser.id, newState);
 
+    // P1.2: Back goes to time mode selection
     await ctx.api.editMessageText(chatId, msgId,
       '🔄 *Частота приёма:*',
       {
@@ -671,10 +683,13 @@ export function registerScheduleHandlers(bot) {
 
       await clearWizardState(ctx.dbUser.id);
 
+      // P3.5: Add "Ещё курс" button after creation
       await ctx.editMessageText(
         '✅ Курс приёма создан!',
         {
           reply_markup: new InlineKeyboard()
+            .text('➕ Ещё курс', `sched:${state.medId}:create`)
+            .row()
             .text('📆 К курсам', `med:${state.medId}:schedule`)
             .text('◀️ К лекарству', `med:${state.medId}`),
         }

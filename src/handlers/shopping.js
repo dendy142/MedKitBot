@@ -28,9 +28,21 @@ async function showShoppingList(ctx, page = 0) {
   const pageItems = paginateItems(items, page);
   let text = `🛒 *Список покупок* (${items.length})\n\n`;
 
+  // P3.3: Group display by medkit
+  const grouped = {};
   for (const item of pageItems) {
-    const medkit = item.medkits?.name ? ` (${item.medkits.name})` : '';
-    text += `☐ ${item.name}${medkit}\n`;
+    const mkName = item.medkits?.name || 'Другое';
+    if (!grouped[mkName]) grouped[mkName] = [];
+    grouped[mkName].push(item);
+  }
+  const groupKeys = Object.keys(grouped);
+  const hasGroups = groupKeys.length > 1 || (groupKeys.length === 1 && groupKeys[0] !== 'Другое');
+  for (const [mkName, gItems] of Object.entries(grouped)) {
+    if (hasGroups) text += `📦 *${mkName}*\n`;
+    for (const item of gItems) {
+      text += `☐ ${item.name}\n`;
+    }
+    if (hasGroups) text += '\n';
   }
 
   const keyboard = new InlineKeyboard();

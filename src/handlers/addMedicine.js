@@ -7,13 +7,21 @@ import { logAction } from '../middleware/logging.js';
 import { supabase } from '../db/supabase.js';
 import { ONBOARDING_COMPLETE_TEXT } from './onboarding.js';
 
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
 async function getState(userId) {
   const { data } = await supabase
     .from('sessions')
-    .select('value')
+    .select('value, updated_at')
     .eq('key', `addmed:${userId}`)
     .single();
-  return data?.value ?? null;
+  if (!data?.value) return null;
+  // P2.7: Auto-clear stale sessions
+  if (data.updated_at && (Date.now() - new Date(data.updated_at).getTime()) > SESSION_TTL_MS) {
+    await clearState(userId);
+    return null;
+  }
+  return data.value;
 }
 
 async function setState(userId, state) {
@@ -131,12 +139,56 @@ async function showCancelResult(ctx, fromOnboarding, medkitId) {
 // START
 // ============================================================
 
+// P1.1: Quick Add — only name → expiry → quantity → save
+export async function startQuickAdd(ctx, medkitId) {
+  const medkit = await getMedkit(medkitId, ctx.dbUser.id);
+  if (!medkit) {
+    await ctx.answerCallbackQuery('Аптечка не найдена');
+    return;
+  }
+  // Clear conflicting states
+  await supabase.from('sessions').delete().eq('key', `state:${ctx.dbUser.id}`);
+
+  const state = {
+    step: 'name',
+    medkitId,
+    medkitName: medkit.name,
+    quickAdd: true,
+    fromOnboarding: false,
+    msgId: null,
+    data: {
+      medkitId,
+      name: null,
+      dosage: null,
+      category: null,
+      tags: [],
+      expiryDate: null,
+      quantity: 0,
+      quantityUnit: 'шт',
+      photoFileIds: [],
+      notes: null,
+    },
+  };
+
+  await ctx.editMessageText(
+    `⚡ *Быстрое добавление в «${medkit.name}»*\n\nВведите *название* лекарства:`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: new InlineKeyboard().text('❌ Отмена', `medkit:${medkitId}`),
+    }
+  );
+  state.msgId = ctx.callbackQuery.message.message_id;
+  await setState(ctx.dbUser.id, state);
+}
+
 export async function startAddMedicine(ctx, medkitId, options = {}) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit) {
     await ctx.answerCallbackQuery('Аптечка не найдена');
     return;
   }
+  // P0.4: Clear any conflicting state session
+  await supabase.from('sessions').delete().eq('key', `state:${ctx.dbUser.id}`);
 
   const state = {
     step: 'name',
@@ -158,16 +210,25 @@ export async function startAddMedicine(ctx, medkitId, options = {}) {
     },
   };
 
-  const header = buildStageHeader(state);
-  await ctx.editMessageText(
-    `${header}\n\nВведите *название* лекарства:`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: new InlineKeyboard().text('❌ Отмена', 'addmed:cancel'),
-    }
-  );
   state.msgId = ctx.callbackQuery.message.message_id;
-  await setState(ctx.dbUser.id, state);
+
+  // P1.6: Support prefilled name from search
+  if (options.prefillName) {
+    state.data.name = options.prefillName;
+    state.step = 'dosage_unit';
+    await setState(ctx.dbUser.id, state);
+    await sendDosageUnitPicker(ctx, state);
+  } else {
+    const header = buildStageHeader(state);
+    await ctx.editMessageText(
+      `${header}\n\nВведите *название* лекарства:`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard().text('❌ Отмена', 'addmed:cancel'),
+      }
+    );
+    await setState(ctx.dbUser.id, state);
+  }
 }
 
 // ============================================================
@@ -184,12 +245,27 @@ export async function handleAddMedicineText(ctx) {
   await deleteUserMsg(ctx);
 
   if (step === 'name') {
+    // P0.2: Validate non-empty name; P2.1: Validate length
+    if (!text || text.length > 100) {
+      const header = buildStageHeader(state);
+      const errMsg = !text ? 'Название не может быть пустым.' : 'Слишком длинное название (макс. 100 символов).';
+      await editBotMsg(ctx, state,
+        `${header}\n\nВведите *название* лекарства:\n\n⚠️ ${errMsg}`,
+        new InlineKeyboard().text('❌ Отмена', 'addmed:cancel')
+      );
+      return true;
+    }
     state.data.name = text;
     if (state.editingFromConfirm) {
       state.editingFromConfirm = false;
       state.step = 'confirm';
       await setState(ctx.dbUser.id, state);
       await sendConfirmation(ctx, state);
+    } else if (state.quickAdd) {
+      // P1.1: Quick Add skips to expiry after name
+      state.step = 'expiry_year';
+      await setState(ctx.dbUser.id, state);
+      await sendExpiryYearPicker(ctx, state);
     } else {
       state.step = 'dosage_unit';
       await setState(ctx.dbUser.id, state);
@@ -199,6 +275,15 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'dosage_value') {
+    // P2.1: Validate dosage length
+    if (text.length > 50) {
+      const header = buildStageHeader(state);
+      await editBotMsg(ctx, state,
+        `${header}\n\nВведите *количество* в *${state.dosageUnit}*:\n\n⚠️ Слишком длинное значение (макс. 50 символов).`,
+        new InlineKeyboard().text(getSkipLabel('dosage_value'), 'addmed:skip').row().text('❌ Отмена', 'addmed:cancel')
+      );
+      return true;
+    }
     state.data.dosage = `${text} ${state.dosageUnit}`;
     if (state.editingFromConfirm) {
       state.editingFromConfirm = false;
@@ -212,6 +297,14 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'dosage_custom') {
+    if (text.length > 50) {
+      const header = buildStageHeader(state);
+      await editBotMsg(ctx, state,
+        `${header}\n\nВведите *дозировку* целиком:\n\n⚠️ Слишком длинное значение (макс. 50 символов).`,
+        new InlineKeyboard().text(getSkipLabel('dosage_custom'), 'addmed:skip').row().text('❌ Отмена', 'addmed:cancel')
+      );
+      return true;
+    }
     state.data.dosage = text;
     if (state.editingFromConfirm) {
       state.editingFromConfirm = false;
@@ -225,6 +318,14 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'category_custom') {
+    if (text.length > 50) {
+      const header = buildStageHeader(state);
+      await editBotMsg(ctx, state,
+        `${header}\n\nВведите *свою категорию*:\n\n⚠️ Слишком длинное значение (макс. 50 символов).`,
+        new InlineKeyboard().text(getSkipLabel('category_custom'), 'addmed:skip').row().text('❌ Отмена', 'addmed:cancel')
+      );
+      return true;
+    }
     state.data.category = text;
     if (state.editingFromConfirm) {
       state.editingFromConfirm = false;
@@ -238,7 +339,16 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'tags') {
-    state.data.tags = text.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    // P2.4: Deduplicate tags; P2.1: Validate tag count
+    state.data.tags = text.split(',').map(t => t.trim()).filter((t, i, arr) => t.length > 0 && arr.indexOf(t) === i);
+    if (state.data.tags.length > 10) {
+      const header = buildStageHeader(state);
+      await editBotMsg(ctx, state,
+        `${header}\n\nВведите *теги* через запятую:\n\n⚠️ Слишком много тегов (макс. 10).`,
+        new InlineKeyboard().text(getSkipLabel('tags'), 'addmed:skip').row().text('❌ Отмена', 'addmed:cancel')
+      );
+      return true;
+    }
     if (state.editingFromConfirm) {
       state.editingFromConfirm = false;
       state.step = 'confirm';
@@ -259,6 +369,11 @@ export async function handleAddMedicineText(ctx) {
         state.step = 'confirm';
         await setState(ctx.dbUser.id, state);
         await sendConfirmation(ctx, state);
+      } else if (state.quickAdd) {
+        // P1.1: Quick Add skips quantity_unit, goes to confirm
+        state.step = 'confirm';
+        await setState(ctx.dbUser.id, state);
+        await sendConfirmation(ctx, state);
       } else {
         state.step = 'quantity_unit';
         await setState(ctx.dbUser.id, state);
@@ -270,13 +385,21 @@ export async function handleAddMedicineText(ctx) {
         `${header}\n\nВведите *количество* (число):\n\n⚠️ Некорректное число, попробуйте ещё раз.`,
         new InlineKeyboard()
           .text(getSkipLabel('quantity'), 'addmed:skip').row()
-          .text('❌ Отмена', 'addmed:cancel')
+          .text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel')
       );
     }
     return true;
   }
 
   if (step === 'notes') {
+    if (text.length > 500) {
+      const header = buildStageHeader(state);
+      await editBotMsg(ctx, state,
+        `${header}\n\nДобавьте *заметки*:\n\n⚠️ Слишком длинная заметка (макс. 500 символов).`,
+        new InlineKeyboard().text(getSkipLabel('notes'), 'addmed:skip').row().text('❌ Отмена', 'addmed:cancel')
+      );
+      return true;
+    }
     state.data.notes = text;
     state.step = 'confirm';
     // editingFromConfirm doesn't matter here, we always go to confirm
@@ -346,6 +469,12 @@ export async function handleAddMedicineCallback(ctx, action) {
     return await advanceStep(ctx, state);
   }
 
+  // P1.2: Back button — go to previous step
+  if (action === 'addmed:back') {
+    await ctx.answerCallbackQuery();
+    return await goBackStep(ctx, state);
+  }
+
   // --- Dosage unit ---
   if (action.startsWith('addmed:dosunit:')) {
     const unit = action.replace('addmed:dosunit:', '');
@@ -360,7 +489,7 @@ export async function handleAddMedicineCallback(ctx, action) {
           parse_mode: 'Markdown',
           reply_markup: new InlineKeyboard()
             .text(getSkipLabel('dosage_custom'), 'addmed:skip').row()
-            .text('❌ Отмена', 'addmed:cancel'),
+            .text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel'),
         }
       );
     } else {
@@ -374,7 +503,7 @@ export async function handleAddMedicineCallback(ctx, action) {
           parse_mode: 'Markdown',
           reply_markup: new InlineKeyboard()
             .text(getSkipLabel('dosage_value'), 'addmed:skip').row()
-            .text('❌ Отмена', 'addmed:cancel'),
+            .text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel'),
         }
       );
     }
@@ -409,7 +538,7 @@ export async function handleAddMedicineCallback(ctx, action) {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
           .text(getSkipLabel('category_custom'), 'addmed:skip').row()
-          .text('❌ Отмена', 'addmed:cancel'),
+          .text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel'),
       }
     );
     return true;
@@ -636,9 +765,16 @@ async function advanceStep(ctx, state) {
     await setState(ctx.dbUser.id, state);
     await sendQuantityPrompt(ctx, state);
   } else if (step === 'quantity' || step === 'quantity_unit') {
-    state.step = 'photos';
-    await setState(ctx.dbUser.id, state);
-    await sendPhotosPrompt(ctx, state);
+    // P1.1: Quick Add skips photos/notes, goes straight to confirm
+    if (state.quickAdd) {
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    } else {
+      state.step = 'photos';
+      await setState(ctx.dbUser.id, state);
+      await sendPhotosPrompt(ctx, state);
+    }
   } else if (step === 'photos') {
     state.step = 'notes';
     await setState(ctx.dbUser.id, state);
@@ -647,6 +783,67 @@ async function advanceStep(ctx, state) {
     state.step = 'confirm';
     await setState(ctx.dbUser.id, state);
     await sendConfirmation(ctx, state);
+  }
+  return true;
+}
+
+// P1.2: Go back to the previous step
+async function goBackStep(ctx, state) {
+  // If editing from confirm, just go back to confirm
+  if (state.editingFromConfirm) {
+    state.editingFromConfirm = false;
+    state.step = 'confirm';
+    await setState(ctx.dbUser.id, state);
+    await sendConfirmation(ctx, state);
+    return true;
+  }
+
+  const { step } = state;
+
+  if (step === 'dosage_unit' || step === 'dosage_value' || step === 'dosage_custom') {
+    state.step = 'name';
+    await setState(ctx.dbUser.id, state);
+    const header = buildStageHeader(state);
+    await editBotMsg(ctx, state,
+      `${header}\n\n${state.data.name ? `Текущее: *${state.data.name}*\n\n` : ''}Введите *название* лекарства:`,
+      new InlineKeyboard().text('❌ Отмена', 'addmed:cancel')
+    );
+  } else if (step === 'category' || step === 'category_custom') {
+    state.step = 'dosage_unit';
+    await setState(ctx.dbUser.id, state);
+    await sendDosageUnitPicker(ctx, state);
+  } else if (step === 'tags') {
+    state.step = 'category';
+    await setState(ctx.dbUser.id, state);
+    await sendCategoryPicker(ctx, state);
+  } else if (step === 'expiry_year') {
+    state.step = 'tags';
+    await setState(ctx.dbUser.id, state);
+    await sendTagsPrompt(ctx, state);
+  } else if (step === 'expiry_month') {
+    state.step = 'expiry_year';
+    await setState(ctx.dbUser.id, state);
+    await sendExpiryYearPicker(ctx, state);
+  } else if (step === 'expiry_day') {
+    state.step = 'expiry_month';
+    await setState(ctx.dbUser.id, state);
+    await sendExpiryMonthPicker(ctx, state, state.expiryYear);
+  } else if (step === 'quantity') {
+    state.step = 'expiry_year';
+    await setState(ctx.dbUser.id, state);
+    await sendExpiryYearPicker(ctx, state);
+  } else if (step === 'quantity_unit') {
+    state.step = 'quantity';
+    await setState(ctx.dbUser.id, state);
+    await sendQuantityPrompt(ctx, state);
+  } else if (step === 'photos') {
+    state.step = 'quantity';
+    await setState(ctx.dbUser.id, state);
+    await sendQuantityPrompt(ctx, state);
+  } else if (step === 'notes') {
+    state.step = 'photos';
+    await setState(ctx.dbUser.id, state);
+    await sendPhotosPrompt(ctx, state);
   }
   return true;
 }
@@ -664,7 +861,7 @@ async function sendDosageUnitPicker(ctx, state) {
     keyboard.row();
   }
   keyboard.text(getSkipLabel('dosage_unit'), 'addmed:skip').row();
-  keyboard.text('❌ Отмена', 'addmed:cancel');
+  keyboard.text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await editBotMsg(ctx, state, `${header}\n\nВыберите *единицу дозировки*:`, keyboard);
 }
@@ -678,7 +875,7 @@ async function sendCategoryPicker(ctx, state) {
   }
   keyboard.text('✏️ Своя категория', 'addmed:cat_custom').row();
   keyboard.text(getSkipLabel('category'), 'addmed:skip').row();
-  keyboard.text('❌ Отмена', 'addmed:cancel');
+  keyboard.text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await editBotMsg(ctx, state, `${header}\n\nВыберите *категорию*:`, keyboard);
 }
@@ -686,7 +883,7 @@ async function sendCategoryPicker(ctx, state) {
 async function sendTagsPrompt(ctx, state) {
   const kb = new InlineKeyboard()
     .text(getSkipLabel('tags'), 'addmed:skip').row()
-    .text('❌ Отмена', 'addmed:cancel');
+    .text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await editBotMsg(ctx, state, `${header}\n\nВведите *теги* через запятую (напр. «для детей, рецептурное»):`, kb);
 }
@@ -700,7 +897,7 @@ async function sendExpiryYearPicker(ctx, state) {
     keyboard.row();
   }
   keyboard.text(getSkipLabel('expiry_year'), 'addmed:skip').row();
-  keyboard.text('❌ Отмена', 'addmed:cancel');
+  keyboard.text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await editBotMsg(ctx, state, `${header}\n\nВыберите *год* срока годности:`, keyboard);
 }
@@ -716,7 +913,7 @@ async function sendExpiryMonthPicker(ctx, state, year) {
     keyboard.row();
   }
   keyboard.text(getSkipLabel('expiry_month'), 'addmed:skip').row();
-  keyboard.text('❌ Отмена', 'addmed:cancel');
+  keyboard.text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await ctx.editMessageText(`${header}\n\nВыберите *месяц* (${year}):`, {
     parse_mode: 'Markdown', reply_markup: keyboard,
@@ -735,7 +932,7 @@ async function sendExpiryDayPicker(ctx, state, year, month) {
     }
     keyboard.row();
   }
-  keyboard.text('❌ Отмена', 'addmed:cancel');
+  keyboard.text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await ctx.editMessageText(`${header}\n\nВыберите *день* (${months[month]} ${year}) или оставьте только месяц:`, {
     parse_mode: 'Markdown', reply_markup: keyboard,
@@ -745,7 +942,7 @@ async function sendExpiryDayPicker(ctx, state, year, month) {
 async function sendQuantityPrompt(ctx, state) {
   const kb = new InlineKeyboard()
     .text(getSkipLabel('quantity'), 'addmed:skip').row()
-    .text('❌ Отмена', 'addmed:cancel');
+    .text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await editBotMsg(ctx, state, `${header}\n\nВведите *количество* (число):`, kb);
 }
@@ -765,7 +962,7 @@ async function sendQuantityUnitPicker(ctx, state) {
 async function sendPhotosPrompt(ctx, state) {
   const kb = new InlineKeyboard()
     .text(getSkipLabel('photos'), 'addmed:skip').row()
-    .text('❌ Отмена', 'addmed:cancel');
+    .text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await editBotMsg(ctx, state, `${header}\n\nОтправьте *фото* лекарства (до ${MAX_PHOTOS} шт.):`, kb);
 }
@@ -773,7 +970,7 @@ async function sendPhotosPrompt(ctx, state) {
 async function sendNotesPrompt(ctx, state) {
   const kb = new InlineKeyboard()
     .text(getSkipLabel('notes'), 'addmed:skip').row()
-    .text('❌ Отмена', 'addmed:cancel');
+    .text('◀️ Назад', 'addmed:back').text('❌ Отмена', 'addmed:cancel');
   const header = buildStageHeader(state);
   await editBotMsg(ctx, state, `${header}\n\nДобавьте *заметки* (напр. «принимать после еды»):`, kb);
 }

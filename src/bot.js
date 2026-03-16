@@ -1,6 +1,7 @@
 import { Bot } from 'grammy';
 import { BOT_TOKEN } from './config.js';
 import { authMiddleware } from './middleware/auth.js';
+import { supabase } from './db/supabase.js';
 import { handleStart } from './handlers/start.js';
 import { handleMainMenu, handleMainMenuCallback } from './handlers/menu.js';
 import { registerOnboardingHandlers } from './handlers/onboarding.js';
@@ -9,7 +10,7 @@ import { registerMedicineHandlers } from './handlers/medicines.js';
 import { registerSettingsHandlers } from './handlers/settings.js';
 import { registerShoppingHandlers } from './handlers/shopping.js';
 import { handleHelp, handleHelpCallback } from './handlers/help.js';
-import { handleSearch, handleSearchCallback } from './handlers/search.js';
+import { handleSearch, handleSearchCallback, registerSearchHandlers } from './handlers/search.js';
 import { handleAddMedicineText, handleAddMedicinePhoto, handleAddMedicineCallback } from './handlers/addMedicine.js';
 import { handleTextState } from './handlers/textState.js';
 import { registerIntakeHandlers } from './handlers/intake.js';
@@ -28,7 +29,12 @@ export function createBot() {
   // Commands
   bot.command('start', handleStart);
   bot.command('help', handleHelp);
+  // P3.7: /cancel clears all active states before returning to menu
   bot.command('cancel', async (ctx) => {
+    try {
+      await supabase.from('sessions').delete().eq('key', `addmed:${ctx.dbUser.id}`);
+      await supabase.from('sessions').delete().eq('key', `state:${ctx.dbUser.id}`);
+    } catch { /* ignore */ }
     await handleMainMenu(ctx);
   });
 
@@ -67,6 +73,7 @@ export function createBot() {
 
   // Search
   bot.callbackQuery('search', handleSearchCallback);
+  registerSearchHandlers(bot);
 
   // Document handler (for CSV import)
   bot.on('message:document', async (ctx) => {

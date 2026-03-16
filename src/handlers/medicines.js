@@ -137,20 +137,30 @@ export function registerMedicineHandlers(bot) {
     await showMedicineCard(ctx, ctx.match[1]);
   });
 
-  // Archive medicine — confirm
+  // Archive medicine — confirm (P2.2: contextual warning)
   bot.callbackQuery(/^med:([0-9a-f-]+):archive$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const med = await getMedicine(ctx.match[1]);
     if (!med) return;
 
-    await ctx.editMessageText(
-      `📥 Переместить «${med.name}» в архив?`,
-      {
-        reply_markup: new InlineKeyboard()
-          .text('✅ Да', `med:${ctx.match[1]}:archive:confirm`)
-          .text('❌ Нет', `med:${ctx.match[1]}`),
-      }
-    );
+    // Check for active schedules
+    const { data: schedules } = await supabase
+      .from('schedules')
+      .select('id')
+      .eq('medicine_id', ctx.match[1])
+      .eq('is_active', true);
+    const schedCount = schedules?.length || 0;
+
+    let text = `📥 Переместить «${med.name}» в архив?`;
+    if (schedCount > 0) {
+      text += `\n\n⚠️ У этого лекарства ${schedCount} активных расписаний. Они продолжат работать, но без привязки к лекарству.`;
+    }
+
+    await ctx.editMessageText(text, {
+      reply_markup: new InlineKeyboard()
+        .text('✅ Да', `med:${ctx.match[1]}:archive:confirm`)
+        .text('❌ Нет', `med:${ctx.match[1]}`),
+    });
   });
 
   // Archive medicine — confirmed
@@ -166,7 +176,7 @@ export function registerMedicineHandlers(bot) {
     }
   });
 
-  // Restock — ask quantity
+  // Restock — ask quantity (P2.6: context-aware buttons, P3.6: expiry warning)
   bot.callbackQuery(/^med:([0-9a-f-]+):restock$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await supabase.from('sessions').upsert(
@@ -175,19 +185,40 @@ export function registerMedicineHandlers(bot) {
     );
     const med = await getMedicine(ctx.match[1]);
     if (!med) return;
-    await ctx.editMessageText(
-      `➕ *Пополнение: ${med.name}*\n\nТекущий остаток: ${formatQuantity(med.quantity, med.quantity_unit)}\n\nВведите количество или выберите:`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard()
-          .text('+1', `med:${ctx.match[1]}:restock:1`)
-          .text('+5', `med:${ctx.match[1]}:restock:5`)
-          .text('+10', `med:${ctx.match[1]}:restock:10`)
-          .text('+30', `med:${ctx.match[1]}:restock:30`)
-          .row()
-          .text('❌ Отмена', `med:${ctx.match[1]}`),
+
+    // P2.6: Adapt restock buttons to quantity_unit
+    const unit = med.quantity_unit || 'шт';
+    let amounts;
+    if (unit === 'мл' || unit === 'капель') {
+      amounts = [10, 50, 100, 250];
+    } else if (unit === 'таблеток' || unit === 'капсул') {
+      amounts = [10, 20, 30, 60];
+    } else if (unit === 'ампул') {
+      amounts = [1, 3, 5, 10];
+    } else {
+      amounts = [1, 5, 10, 30];
+    }
+
+    // P3.6: Warn if expired
+    let text = `➕ *Пополнение: ${med.name}*\n\nТекущий остаток: ${formatQuantity(med.quantity, med.quantity_unit)}`;
+    if (med.expiry_date) {
+      const days = daysUntil(med.expiry_date);
+      if (days !== null && days <= 0) {
+        text += `\n\n⚠️ *Срок годности истёк (${formatExpiry(med.expiry_date)})!* Проверьте лекарство.`;
       }
-    );
+    }
+    text += '\n\nВведите количество или выберите:';
+
+    const keyboard = new InlineKeyboard();
+    for (const a of amounts) {
+      keyboard.text(`+${a}`, `med:${ctx.match[1]}:restock:${a}`);
+    }
+    keyboard.row().text('❌ Отмена', `med:${ctx.match[1]}`);
+
+    await ctx.editMessageText(text, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    });
   });
 
   // Quick restock buttons
@@ -264,14 +295,22 @@ export function registerMedicineHandlers(bot) {
     );
   });
 
-  // Show photos
+  // Show photos (P2.8: group photos to avoid chat spam)
   bot.callbackQuery(/^med:([0-9a-f-]+):photos$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const med = await getMedicine(ctx.match[1]);
     if (!med || !med.photo_file_ids || med.photo_file_ids.length === 0) return;
 
-    for (const fileId of med.photo_file_ids) {
-      await ctx.replyWithPhoto(fileId);
+    if (med.photo_file_ids.length === 1) {
+      await ctx.replyWithPhoto(med.photo_file_ids[0]);
+    } else {
+      // Send as media group (single message with multiple photos)
+      const mediaGroup = med.photo_file_ids.map((fileId, i) => ({
+        type: 'photo',
+        media: fileId,
+        ...(i === 0 ? { caption: `📷 ${med.name} (${med.photo_file_ids.length} фото)` } : {}),
+      }));
+      await ctx.replyWithMediaGroup(mediaGroup);
     }
     await ctx.reply('📷 Все фото:', {
       reply_markup: new InlineKeyboard().text('◀️ Назад', `med:${med.id}`),
@@ -472,21 +511,21 @@ export function registerMedicineHandlers(bot) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
-  // Permanent delete — confirm
+  // Permanent delete — confirm (P2.2: contextual warning)
   bot.callbackQuery(/^med:([0-9a-f-]+):permdelete$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const medId = ctx.match[1];
     const med = await getMedicine(medId);
     if (!med) return;
 
-    await ctx.editMessageText(
-      `🗑 Удалить навсегда «${med.name}»? Это действие нельзя отменить.`,
-      {
-        reply_markup: new InlineKeyboard()
-          .text('✅ Да, удалить', `med:${medId}:permdelete:confirm`)
-          .text('❌ Нет', `medkit:${med.medkit_id}:archive`),
-      }
-    );
+    let text = `🗑 Удалить навсегда «${med.name}»? Это действие нельзя отменить.`;
+    text += `\n\n⚠️ Будут также удалены все связанные расписания и логи приёма.`;
+
+    await ctx.editMessageText(text, {
+      reply_markup: new InlineKeyboard()
+        .text('✅ Да, удалить', `med:${medId}:permdelete:confirm`)
+        .text('❌ Нет', `medkit:${med.medkit_id}:archive`),
+    });
   });
 
   // Permanent delete — confirmed

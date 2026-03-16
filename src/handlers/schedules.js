@@ -200,7 +200,7 @@ async function showConfirmation(ctx, state, msgId) {
 
   const keyboard = new InlineKeyboard()
     .text('✅ Создать', 'sched:confirm:yes')
-    .text('❌ Отмена', `med:${state.medId}:schedule`);
+    .text('◀️ Назад', 'sched:back:dur');
 
   if (ctx.callbackQuery) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -275,7 +275,7 @@ export async function handleScheduleText(ctx) {
           .text('2', 'sched:dose:2')
           .text('3', 'sched:dose:3')
           .row()
-          .text('◀️ Назад', `sched:${state.medId}:create`)
+          .text('◀️ Назад', 'sched:back:time')
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -295,7 +295,7 @@ export async function handleScheduleText(ctx) {
             .text('2', 'sched:dose:2')
             .text('3', 'sched:dose:3')
             .row()
-            .text('◀️ Назад', `sched:${state.medId}:create`)
+            .text('◀️ Назад', 'sched:back:time')
             .text('❌ Отмена', `med:${state.medId}:schedule`),
         }
       );
@@ -305,7 +305,6 @@ export async function handleScheduleText(ctx) {
     const newState = { ...state, step: 'frequency', dosePerIntake: num };
     await saveWizardState(ctx.dbUser.id, newState);
 
-    // P1.2: Back goes to time mode selection
     await ctx.api.editMessageText(chatId, msgId,
       '🔄 *Частота приёма:*',
       {
@@ -317,7 +316,7 @@ export async function handleScheduleText(ctx) {
           .row()
           .text('По дням недели', 'sched:freq:weekly')
           .row()
-          .text('◀️ Назад', `sched:${state.medId}:create`)
+          .text('◀️ Назад', 'sched:back:dose')
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -332,6 +331,7 @@ export async function handleScheduleText(ctx) {
         '⚠️ Введите положительное целое число дней:',
         {
           reply_markup: new InlineKeyboard()
+            .text('◀️ Назад', 'sched:back:dur')
             .text('❌ Отмена', `med:${state.medId}:schedule`),
         }
       );
@@ -352,6 +352,7 @@ export async function handleScheduleText(ctx) {
         '⚠️ Введите дату в формате ДД.ММ.ГГГГ:',
         {
           reply_markup: new InlineKeyboard()
+            .text('◀️ Назад', 'sched:back:dur')
             .text('❌ Отмена', `med:${state.medId}:schedule`),
         }
       );
@@ -367,6 +368,7 @@ export async function handleScheduleText(ctx) {
         '⚠️ Дата должна быть сегодня или позже. Введите в формате ДД.ММ.ГГГГ:',
         {
           reply_markup: new InlineKeyboard()
+            .text('◀️ Назад', 'sched:back:dur')
             .text('❌ Отмена', `med:${state.medId}:schedule`),
         }
       );
@@ -414,8 +416,105 @@ export function registerScheduleHandlers(bot) {
           .text('🕐 Точное время', 'sched:time:exact')
           .text('🌅 Период дня', 'sched:time:period')
           .row()
-          .text('◀️ Назад', `med:${medId}:schedule`)
-          .text('❌ Отмена', `med:${medId}`),
+          .text('◀️ Назад', `med:${medId}:schedule`),
+      }
+    );
+  });
+
+  // --- Back navigation handlers ---
+  bot.callbackQuery('sched:back:time', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const state = await getWizardState(ctx.dbUser.id);
+    if (!state || state.action !== 'create_schedule') return;
+    const newState = { ...state, step: 'time_mode' };
+    await saveWizardState(ctx.dbUser.id, newState);
+    await ctx.editMessageText(
+      '⏰ *Когда принимать?*\n\nВыберите режим:',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text('🕐 Точное время', 'sched:time:exact')
+          .text('🌅 Период дня', 'sched:time:period')
+          .row()
+          .text('◀️ Назад', `med:${state.medId}:schedule`),
+      }
+    );
+  });
+
+  bot.callbackQuery('sched:back:dose', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const state = await getWizardState(ctx.dbUser.id);
+    if (!state || state.action !== 'create_schedule') return;
+    const newState = { ...state, step: 'dose' };
+    await saveWizardState(ctx.dbUser.id, newState);
+    const med = await getMedicine(state.medId);
+    const timeDisplay = state.timeMode === 'exact' ? state.timeValue : (PERIOD_LABELS[state.timeValue] || state.timeValue);
+    await ctx.editMessageText(
+      `💊 *Доза за приём*\n\nЛекарство: ${med?.name || '?'}\nВремя: ${timeDisplay}\n\nВведите количество (${med?.quantity_unit || 'шт'}) за один приём:`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text('0.5', 'sched:dose:0.5')
+          .text('1', 'sched:dose:1')
+          .text('2', 'sched:dose:2')
+          .text('3', 'sched:dose:3')
+          .row()
+          .text('◀️ Назад', 'sched:back:time')
+          .text('❌ Отмена', `med:${state.medId}:schedule`),
+      }
+    );
+  });
+
+  bot.callbackQuery('sched:back:freq', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const state = await getWizardState(ctx.dbUser.id);
+    if (!state || state.action !== 'create_schedule') return;
+    const newState = { ...state, step: 'frequency' };
+    await saveWizardState(ctx.dbUser.id, newState);
+    await ctx.editMessageText(
+      '🔄 *Частота приёма:*',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text('Ежедневно', 'sched:freq:daily')
+          .row()
+          .text('Через день', 'sched:freq:every_other_day')
+          .row()
+          .text('По дням недели', 'sched:freq:weekly')
+          .row()
+          .text('◀️ Назад', 'sched:back:dose')
+          .text('❌ Отмена', `med:${state.medId}:schedule`),
+      }
+    );
+  });
+
+  bot.callbackQuery('sched:back:weekdays', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const state = await getWizardState(ctx.dbUser.id);
+    if (!state || state.action !== 'create_schedule') return;
+    const newState = { ...state, step: 'weekly_days' };
+    await saveWizardState(ctx.dbUser.id, newState);
+    await showWeeklyDaySelector(ctx, state.frequencyDays || []);
+  });
+
+  bot.callbackQuery('sched:back:dur', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const state = await getWizardState(ctx.dbUser.id);
+    if (!state || state.action !== 'create_schedule') return;
+    const newState = { ...state, step: 'duration' };
+    await saveWizardState(ctx.dbUser.id, newState);
+    await ctx.editMessageText(
+      '📅 *Длительность курса:*',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text('♾ Бессрочно', 'sched:dur:indefinite')
+          .row()
+          .text('📅 Кол-во дней', 'sched:dur:days')
+          .text('📅 До даты', 'sched:dur:until_date')
+          .row()
+          .text('◀️ Назад', state.frequency === 'weekly' ? 'sched:back:weekdays' : 'sched:back:freq')
+          .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
   });
@@ -485,7 +584,7 @@ export function registerScheduleHandlers(bot) {
           .text('2', 'sched:dose:2')
           .text('3', 'sched:dose:3')
           .row()
-          .text('◀️ Назад', `sched:${state.medId}:create`)
+          .text('◀️ Назад', 'sched:back:time')
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -512,7 +611,7 @@ export function registerScheduleHandlers(bot) {
           .row()
           .text('По дням недели', 'sched:freq:weekly')
           .row()
-          .text('◀️ Назад', `sched:${state.medId}:create`)
+          .text('◀️ Назад', 'sched:back:dose')
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -538,6 +637,7 @@ export function registerScheduleHandlers(bot) {
           .text('📅 Кол-во дней', 'sched:dur:days')
           .text('📅 До даты', 'sched:dur:until_date')
           .row()
+          .text('◀️ Назад', 'sched:back:freq')
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -603,6 +703,7 @@ export function registerScheduleHandlers(bot) {
           .text('📅 Кол-во дней', 'sched:dur:days')
           .text('📅 До даты', 'sched:dur:until_date')
           .row()
+          .text('◀️ Назад', 'sched:back:weekdays')
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -636,6 +737,7 @@ export function registerScheduleHandlers(bot) {
           .text('14', 'sched:durdays:14')
           .text('30', 'sched:durdays:30')
           .row()
+          .text('◀️ Назад', 'sched:back:dur')
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -666,6 +768,7 @@ export function registerScheduleHandlers(bot) {
       '📅 Введите дату окончания курса в формате ДД.ММ.ГГГГ:',
       {
         reply_markup: new InlineKeyboard()
+          .text('◀️ Назад', 'sched:back:dur')
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -809,6 +912,7 @@ async function showWeeklyDaySelector(ctx, selectedDays) {
   keyboard.row();
 
   const state = await getWizardState(ctx.dbUser.id);
+  keyboard.text('◀️ Назад', 'sched:back:freq');
   keyboard.text('❌ Отмена', `med:${state?.medId}:schedule`);
 
   const selectedStr = selectedDays.length > 0

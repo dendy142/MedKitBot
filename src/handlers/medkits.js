@@ -52,6 +52,52 @@ async function showMedkitList(ctx, page = 0) {
 }
 
 /**
+ * Build medkit keyboard with medicine buttons and actions.
+ * Shared by showMedkit and sort view to prevent button loss.
+ */
+function buildMedkitKeyboard(medkitId, pageItems, page, totalItems) {
+  const keyboard = new InlineKeyboard();
+
+  // Medicine buttons (2 per row)
+  for (let i = 0; i < pageItems.length; i += 2) {
+    keyboard.text(pageItems[i].name, `med:${pageItems[i].id}`);
+    if (pageItems[i + 1]) {
+      keyboard.text(pageItems[i + 1].name, `med:${pageItems[i + 1].id}`);
+    }
+    keyboard.row();
+  }
+
+  addPagination(keyboard, page, totalItems, `mk:${medkitId}`);
+
+  keyboard.row();
+  keyboard.text('➕ Добавить', `medkit:${medkitId}:add`);
+  keyboard.text('🔀 Сорт.', `medkit:${medkitId}:sort`);
+  keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
+  keyboard.row();
+  keyboard.text('⋯ Управление', `medkit:${medkitId}:manage`);
+  keyboard.row();
+  keyboard.text('◀️ Назад', 'medkits');
+
+  return keyboard;
+}
+
+/**
+ * Format medicine list text
+ */
+function formatMedicineList(pageItems, settings) {
+  let text = '';
+  for (const med of pageItems) {
+    const emoji = medicineStatusEmoji(med, settings.thresholds);
+    const qty = formatQuantity(med.quantity, med.quantity_unit);
+    const thresholdDays = settings.thresholds?.expiry_days || 30;
+    const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format, thresholdDays) : '';
+    text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
+    text += `└ ${qty}${expiry ? ' | до ' + expiry : ''}\n`;
+  }
+  return text;
+}
+
+/**
  * Show single medkit screen with medicines
  */
 async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } = {}) {
@@ -80,48 +126,18 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
   }
   text += '\n\n';
 
-  for (const med of pageItems) {
-    const emoji = medicineStatusEmoji(med, settings.thresholds);
-    const qty = formatQuantity(med.quantity, med.quantity_unit);
-    const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format) : '';
-    text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
-    text += `   Остаток: ${qty}${expiry ? ' | Годен до: ' + expiry : ''}\n`;
-  }
+  text += formatMedicineList(pageItems, settings);
 
   if (medicines.length === 0) {
     text += '_Аптечка пуста. Добавьте первое лекарство!_\n';
   }
 
-  const keyboard = new InlineKeyboard();
-
-  // Medicine buttons (2 per row)
-  for (let i = 0; i < pageItems.length; i += 2) {
-    keyboard.text(pageItems[i].name, `med:${pageItems[i].id}`);
-    if (pageItems[i + 1]) {
-      keyboard.text(pageItems[i + 1].name, `med:${pageItems[i + 1].id}`);
-    }
-    keyboard.row();
-  }
-
-  addPagination(keyboard, page, medicines.length, `mk:${medkitId}`);
-
-  keyboard.row();
-  keyboard.text('➕ Добавить', `medkit:${medkitId}:add`);
-  keyboard.text('🔀 Сортировка', `medkit:${medkitId}:sort`);
-  keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
-  keyboard.row();
-  keyboard.text('👥 Поделиться', `medkit:${medkitId}:share`);
-  keyboard.text('✏️ Редакт.', `medkit:${medkitId}:rename`);
-  keyboard.text('🗑 Удалить', `medkit:${medkitId}:delete`);
-  keyboard.row();
-  keyboard.text('🗃 Архив', `medkit:${medkitId}:archive`);
-  keyboard.text('◀️ Назад', 'medkits');
-
+  const keyboard = buildMedkitKeyboard(medkitId, pageItems, page, medicines.length);
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
 
 /**
- * Sort medicines by problems priority: expired -> expiring soon -> low stock -> rest
+ * Sort medicines by problems priority
  */
 function sortByProblems(medicines, thresholds) {
   return [...medicines].sort((a, b) => {
@@ -133,16 +149,12 @@ function sortByProblems(medicines, thresholds) {
 
 function problemScore(med, thresholds) {
   const days = daysUntil(med.expiry_date);
-  // Expired — highest priority (lowest score)
   if (days !== null && days <= 0) return 0;
-  // Expiring soon
   if (days !== null && days <= (thresholds?.expiry_days || 30)) return 1;
-  // Low stock
   const lowCount = thresholds?.low_stock_count || 5;
   const lowPercent = thresholds?.low_stock_percent || 20;
   if (med.quantity <= lowCount) return 2;
   if (med.initial_quantity > 0 && (med.quantity / med.initial_quantity) * 100 <= lowPercent) return 2;
-  // Normal
   return 3;
 }
 
@@ -202,6 +214,29 @@ export function registerMedkitHandlers(bot) {
     await startAddMedicine(ctx, ctx.match[1], { fromOnboarding: true });
   });
 
+  // Manage medkit submenu
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):manage$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    const medkit = await getMedkit(medkitId, ctx.dbUser.id);
+    if (!medkit) return;
+
+    await ctx.editMessageText(
+      `⚙️ *Управление: ${medkit.name}*`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text('👥 Поделиться', `medkit:${medkitId}:share`)
+          .text('✏️ Переименовать', `medkit:${medkitId}:rename`)
+          .row()
+          .text('🗃 Архив', `medkit:${medkitId}:archive`)
+          .text('🗑 Удалить', `medkit:${medkitId}:delete`)
+          .row()
+          .text('◀️ Назад', `medkit:${medkitId}`),
+      }
+    );
+  });
+
   // Rename medkit — ask new name
   bot.callbackQuery(/^medkit:([0-9a-f-]+):rename$/, async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -230,7 +265,7 @@ export function registerMedkitHandlers(bot) {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
           .text('✅ Да, удалить', `medkit:${ctx.match[1]}:delete:confirm`)
-          .text('❌ Нет', `medkit:${ctx.match[1]}`),
+          .text('❌ Нет', `medkit:${ctx.match[1]}:manage`),
       }
     );
   });
@@ -258,19 +293,18 @@ export function registerMedkitHandlers(bot) {
           .text('По категории', `medkit:${medkitId}:sort:category`)
           .text('По остатку', `medkit:${medkitId}:sort:quantity`)
           .row()
-          .text('⚠️ Сначала проблемные', `medkit:${medkitId}:sort:problems`)
+          .text('⚠️ Проблемные', `medkit:${medkitId}:sort:problems`)
           .row()
           .text('◀️ Назад', `medkit:${medkitId}`),
       }
     );
   });
 
-  // Apply sort (temporary — changes display sort for this view)
+  // Apply sort — uses shared keyboard builder
   bot.callbackQuery(/^medkit:([0-9a-f-]+):sort:(\w+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const medkitId = ctx.match[1];
     const sortBy = ctx.match[2];
-    // Show medkit with selected sort
     const medkit = await getMedkit(medkitId, ctx.dbUser.id);
     if (!medkit) return;
 
@@ -278,7 +312,6 @@ export function registerMedkitHandlers(bot) {
 
     let medicines;
     if (sortBy === 'problems') {
-      // Client-side sorting by problem priority
       medicines = await getMedkitMedicines(medkitId, { sortBy: 'name' });
       medicines = sortByProblems(medicines, settings.thresholds);
     } else {
@@ -288,28 +321,9 @@ export function registerMedkitHandlers(bot) {
     const pageItems = paginateItems(medicines, 0);
 
     let text = `📦 *${medkit.name}* (${medicines.length})\n\n`;
-    for (const med of pageItems) {
-      const emoji = medicineStatusEmoji(med, settings.thresholds);
-      const qty = formatQuantity(med.quantity, med.quantity_unit);
-      const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format) : '';
-      text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
-      text += `   Остаток: ${qty}${expiry ? ' | Годен до: ' + expiry : ''}\n`;
-    }
+    text += formatMedicineList(pageItems, settings);
 
-    const keyboard = new InlineKeyboard();
-    for (let i = 0; i < pageItems.length; i += 2) {
-      keyboard.text(pageItems[i].name, `med:${pageItems[i].id}`);
-      if (pageItems[i + 1]) keyboard.text(pageItems[i + 1].name, `med:${pageItems[i + 1].id}`);
-      keyboard.row();
-    }
-    addPagination(keyboard, 0, medicines.length, `mk:${medkitId}`);
-    keyboard.row();
-    keyboard.text('➕ Добавить', `medkit:${medkitId}:add`);
-    keyboard.text('🔀 Сортировка', `medkit:${medkitId}:sort`);
-    keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
-    keyboard.row();
-    keyboard.text('◀️ Назад', 'medkits');
-
+    const keyboard = buildMedkitKeyboard(medkitId, pageItems, 0, medicines.length);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -326,8 +340,6 @@ export function registerMedkitHandlers(bot) {
           .text('По категории ▸', `medkit:${medkitId}:filter:cat`)
           .row()
           .text('По тегу ▸', `medkit:${medkitId}:filter:tag`)
-          .row()
-          .text('❌ Сбросить', `medkit:${medkitId}`)
           .row()
           .text('◀️ Назад', `medkit:${medkitId}`),
       }

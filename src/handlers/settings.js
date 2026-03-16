@@ -15,7 +15,7 @@ const SORT_LABELS = {
  */
 async function showSettings(ctx) {
   const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
-  const tz = ctx.dbUser.timezone || 'Etc/GMT-3';
+  const tz = ctx.dbUser.timezone || 'Europe/Moscow';
   const tzLabel = TIMEZONES.find(t => t.value === tz)?.label || tz;
 
   let text = `⚙️ *Настройки*\n\n`;
@@ -262,27 +262,30 @@ export function registerSettingsHandlers(bot) {
   });
 
   // --- Display ---
+  function buildDisplayView(d) {
+    const check = (val, current) => val === current ? ' ✓' : '';
+    const text = `📋 *Отображение*\n\n` +
+      `🔀 Сортировка: *${SORT_LABELS[d.default_sort] || d.default_sort}*\n` +
+      `📅 Формат дат: *${d.date_format}*`;
+    const keyboard = new InlineKeyboard()
+      .text(`По имени${check('name', d.default_sort)}`, 'set:disp:sort:name')
+      .text(`По сроку${check('expiry', d.default_sort)}`, 'set:disp:sort:expiry')
+      .row()
+      .text(`По категории${check('category', d.default_sort)}`, 'set:disp:sort:category')
+      .text(`По остатку${check('quantity', d.default_sort)}`, 'set:disp:sort:quantity')
+      .row()
+      .text(`ДД.ММ.ГГГГ${check('DD.MM.YYYY', d.date_format)}`, 'set:disp:date:DD.MM.YYYY')
+      .text(`ГГГГ-ММ-ДД${check('YYYY-MM-DD', d.date_format)}`, 'set:disp:date:YYYY-MM-DD')
+      .row()
+      .text('◀️ Назад', 'settings');
+    return { text, keyboard };
+  }
+
   bot.callbackQuery('set:display', async (ctx) => {
     await ctx.answerCallbackQuery();
     const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
     const d = s.display || DEFAULT_SETTINGS.display;
-
-    const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${SORT_LABELS[d.default_sort] || d.default_sort}*\n` +
-      `📅 Формат дат: *${d.date_format}*`;
-
-    const keyboard = new InlineKeyboard()
-      .text('По имени', 'set:disp:sort:name')
-      .text('По сроку', 'set:disp:sort:expiry')
-      .row()
-      .text('По категории', 'set:disp:sort:category')
-      .text('По остатку', 'set:disp:sort:quantity')
-      .row()
-      .text('ДД.ММ.ГГГГ', 'set:disp:date:DD.MM.YYYY')
-      .text('ГГГГ-ММ-ДД', 'set:disp:date:YYYY-MM-DD')
-      .row()
-      .text('◀️ Назад', 'settings');
-
+    const { text, keyboard } = buildDisplayView(d);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -294,21 +297,7 @@ export function registerSettingsHandlers(bot) {
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
     await ctx.answerCallbackQuery(`Сортировка: ${SORT_LABELS[sort] || sort}`);
-    const d = s.display;
-    const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${SORT_LABELS[d.default_sort] || d.default_sort}*\n` +
-      `📅 Формат дат: *${d.date_format}*`;
-    const keyboard = new InlineKeyboard()
-      .text('По имени', 'set:disp:sort:name')
-      .text('По сроку', 'set:disp:sort:expiry')
-      .row()
-      .text('По категории', 'set:disp:sort:category')
-      .text('По остатку', 'set:disp:sort:quantity')
-      .row()
-      .text('ДД.ММ.ГГГГ', 'set:disp:date:DD.MM.YYYY')
-      .text('ГГГГ-ММ-ДД', 'set:disp:date:YYYY-MM-DD')
-      .row()
-      .text('◀️ Назад', 'settings');
+    const { text, keyboard } = buildDisplayView(s.display);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -320,21 +309,7 @@ export function registerSettingsHandlers(bot) {
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
     await ctx.answerCallbackQuery(`Формат: ${fmt}`);
-    const d = s.display;
-    const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${SORT_LABELS[d.default_sort] || d.default_sort}*\n` +
-      `📅 Формат дат: *${d.date_format}*`;
-    const keyboard = new InlineKeyboard()
-      .text('По имени', 'set:disp:sort:name')
-      .text('По сроку', 'set:disp:sort:expiry')
-      .row()
-      .text('По категории', 'set:disp:sort:category')
-      .text('По остатку', 'set:disp:sort:quantity')
-      .row()
-      .text('ДД.ММ.ГГГГ', 'set:disp:date:DD.MM.YYYY')
-      .text('ГГГГ-ММ-ДД', 'set:disp:date:YYYY-MM-DD')
-      .row()
-      .text('◀️ Назад', 'settings');
+    const { text, keyboard } = buildDisplayView(s.display);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 }

@@ -1,7 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { getMedicine, updateMedicine, archiveMedicine, restoreMedicine, toggleFavorite, getArchivedMedicines, createMedicine } from '../db/queries/medicines.js';
 import { getMedkit, getUserMedkits } from '../db/queries/medkits.js';
-import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUntil } from '../utils/format.js';
+import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUntil, formatProgressBar } from '../utils/format.js';
 import { logAction, logMedicineChange } from '../middleware/logging.js';
 import { getMedicineHistory } from '../db/queries/actionLogs.js';
 import { supabase } from '../db/supabase.js';
@@ -18,7 +18,7 @@ async function showMedicineCard(ctx, medicineId) {
 
   const settings = ctx.dbUser.settings || {};
   const dateFormat = settings.display?.date_format || 'DD.MM.YYYY';
-  const emoji = medicineStatusEmoji(med, settings.thresholds);
+  const thresholdDays = settings.thresholds?.expiry_days || 30;
 
   let text = `💊 *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
 
@@ -28,14 +28,15 @@ async function showMedicineCard(ctx, medicineId) {
   }
   if (med.category || (med.tags && med.tags.length > 0)) text += '\n';
 
-  text += `📅 Срок: ${formatExpiry(med.expiry_date, dateFormat)}\n`;
+  text += `📅 Срок: ${formatExpiry(med.expiry_date, dateFormat, thresholdDays)}\n`;
 
-  // Quantity with progress
-  const qty = formatQuantity(med.quantity, med.quantity_unit);
+  // Quantity with visual progress bar
   if (med.initial_quantity > 0) {
     const percent = Math.round((med.quantity / med.initial_quantity) * 100);
-    text += `📏 Остаток: ${med.quantity}/${med.initial_quantity} ${med.quantity_unit} (${percent}%)\n`;
+    const bar = formatProgressBar(med.quantity, med.initial_quantity);
+    text += `📏 ${bar} ${med.quantity}/${med.initial_quantity} ${med.quantity_unit} (${percent}%)\n`;
   } else {
+    const qty = formatQuantity(med.quantity, med.quantity_unit);
     text += `📏 Остаток: ${qty}\n`;
   }
 
@@ -43,23 +44,21 @@ async function showMedicineCard(ctx, medicineId) {
 
   if (med.is_favorite) text += `\n⭐ В избранном`;
 
-  // Keyboard
+  // Keyboard — grouped by frequency of use
   const keyboard = new InlineKeyboard();
+  // Row 1: Primary actions
   keyboard.text('✏️ Изменить', `med:${med.id}:edit`);
   keyboard.text('➕ Пополнить', `med:${med.id}:restock`);
-  keyboard.row();
-  keyboard.text('📆 Приём', `med:${med.id}:schedule`);
-  keyboard.text('📋 Копировать', `med:${med.id}:copymove`);
   keyboard.text(med.is_favorite ? '⭐' : '☆', `med:${med.id}:fav`);
   keyboard.row();
-  if (med.photo_file_ids && med.photo_file_ids.length > 0) {
-    keyboard.text(`📷 Фото (${med.photo_file_ids.length})`, `med:${med.id}:photos`);
-  }
-  keyboard.text('📋 История', `med:${med.id}:history`);
-  keyboard.row();
+  // Row 2: Secondary actions
+  keyboard.text('📆 Курс приёма', `med:${med.id}:schedule`);
   keyboard.text('🛒 В покупки', `med:${med.id}:shop`);
-  keyboard.text('🗑 В архив', `med:${med.id}:archive`);
   keyboard.row();
+  // Row 3: More actions submenu
+  keyboard.text('⋯ Ещё', `med:${med.id}:more`);
+  keyboard.row();
+  // Row 4: Navigation
   keyboard.text('◀️ Назад', `medkit:${med.medkit_id}`);
 
   if (ctx.callbackQuery) {
@@ -83,9 +82,6 @@ function formatDateTime(dateStr) {
   return `${day}.${month}.${year} ${hours}:${minutes}`;
 }
 
-/**
- * Field name mapping for history display
- */
 const FIELD_LABELS = {
   name: 'Название',
   dosage: 'Дозировка',
@@ -106,6 +102,31 @@ export function registerMedicineHandlers(bot) {
     await showMedicineCard(ctx, ctx.match[1]);
   });
 
+  // "More" submenu
+  bot.callbackQuery(/^med:([0-9a-f-]+):more$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const med = await getMedicine(medId);
+    if (!med) return;
+
+    const keyboard = new InlineKeyboard();
+    if (med.photo_file_ids && med.photo_file_ids.length > 0) {
+      keyboard.text(`📷 Фото (${med.photo_file_ids.length})`, `med:${medId}:photos`).row();
+    }
+    keyboard
+      .text('📑 Дублировать', `med:${medId}:copymove`)
+      .text('🕓 История', `med:${medId}:history`)
+      .row()
+      .text('📥 В архив', `med:${medId}:archive`)
+      .row()
+      .text('◀️ Назад', `med:${medId}`);
+
+    await ctx.editMessageText(
+      `⋯ *${med.name}* — дополнительно:`,
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  });
+
   // Toggle favorite
   bot.callbackQuery(/^med:([0-9a-f-]+):fav$/, async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -120,7 +141,7 @@ export function registerMedicineHandlers(bot) {
     if (!med) return;
 
     await ctx.editMessageText(
-      `🗑 Переместить «${med.name}» в архив?`,
+      `📥 Переместить «${med.name}» в архив?`,
       {
         reply_markup: new InlineKeyboard()
           .text('✅ Да', `med:${ctx.match[1]}:archive:confirm`)
@@ -135,7 +156,6 @@ export function registerMedicineHandlers(bot) {
     await archiveMedicine(ctx.match[1]);
     await logAction(ctx.dbUser.id, 'archive', 'medicine', ctx.match[1]);
     await ctx.answerCallbackQuery('Перемещено в архив');
-    // Go back to medkit
     if (med) {
       await ctx.editMessageText('✅ Лекарство перемещено в архив.', {
         reply_markup: new InlineKeyboard().text('◀️ К аптечке', `medkit:${med.medkit_id}`),
@@ -239,7 +259,7 @@ export function registerMedicineHandlers(bot) {
 
     const history = await getMedicineHistory(medId);
 
-    let text = `📋 *История: ${med.name}*\n\n`;
+    let text = `🕓 *История: ${med.name}*\n\n`;
 
     if (history.length === 0) {
       text += '_Нет записей об изменениях._\n';
@@ -257,7 +277,7 @@ export function registerMedicineHandlers(bot) {
     }
 
     const keyboard = new InlineKeyboard()
-      .text('◀️ Назад', `med:${medId}`);
+      .text('◀️ Назад', `med:${medId}:more`);
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
@@ -268,13 +288,13 @@ export function registerMedicineHandlers(bot) {
     const medId = ctx.match[1];
 
     const keyboard = new InlineKeyboard()
-      .text('📋 Копировать', `med:${medId}:copy`)
+      .text('📑 Дублировать', `med:${medId}:copy`)
       .text('📦 Переместить', `med:${medId}:move`)
       .row()
-      .text('◀️ Назад', `med:${medId}`);
+      .text('◀️ Назад', `med:${medId}:more`);
 
     await ctx.editMessageText(
-      '📂 *Копирование / Перемещение*\n\nВыберите действие:',
+      '📂 *Дублирование / Перемещение*\n\nВыберите действие:',
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
@@ -291,7 +311,7 @@ export function registerMedicineHandlers(bot) {
 
     if (otherMedkits.length === 0) {
       await ctx.editMessageText(
-        '📋 Нет других аптечек для копирования.\n\nСоздайте ещё одну аптечку.',
+        '📑 Нет других аптечек для дублирования.\n\nСоздайте ещё одну аптечку.',
         { reply_markup: new InlineKeyboard().text('◀️ Назад', `med:${medId}:copymove`) }
       );
       return;
@@ -304,7 +324,7 @@ export function registerMedicineHandlers(bot) {
     keyboard.text('◀️ Назад', `med:${medId}:copymove`);
 
     await ctx.editMessageText(
-      `📋 *Копировать «${med.name}»*\n\nВыберите аптечку:`,
+      `📑 *Дублировать «${med.name}»*\n\nВыберите аптечку:`,
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
@@ -334,7 +354,7 @@ export function registerMedicineHandlers(bot) {
     });
 
     await ctx.editMessageText(
-      `✅ «${med.name}» скопировано в аптечку «${targetMedkit.name}».`,
+      `✅ «${med.name}» дублировано в аптечку «${targetMedkit.name}».`,
       {
         reply_markup: new InlineKeyboard()
           .text('◀️ К лекарству', `med:${medId}`)
@@ -381,7 +401,6 @@ export function registerMedicineHandlers(bot) {
     const med = await getMedicine(medId);
     if (!med) return;
 
-    const sourceMedkitId = med.medkit_id;
     const targetMedkit = await getMedkit(targetMedkitId, ctx.dbUser.id);
     if (!targetMedkit) return;
 
@@ -403,7 +422,8 @@ export function registerMedicineHandlers(bot) {
     const archived = await getArchivedMedicines(ctx.match[1]);
 
     if (archived.length === 0) {
-      await ctx.editMessageText('📂 Архив пуст.', {
+      await ctx.editMessageText('📂 Архив пуст.\n\n_Архивированные лекарства появятся здесь._', {
+        parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${ctx.match[1]}`),
       });
       return;
@@ -413,7 +433,7 @@ export function registerMedicineHandlers(bot) {
     const keyboard = new InlineKeyboard();
 
     for (const med of archived) {
-      text += `🗑 ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n`;
+      text += `📥 ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n`;
       keyboard
         .text(`♻️ ${med.name}`, `med:${med.id}:restore`)
         .text('🗑', `med:${med.id}:permdelete`)
@@ -469,6 +489,4 @@ export function registerMedicineHandlers(bot) {
       });
     }
   });
-
-  // Schedule handler is registered in schedules.js (registerScheduleHandlers)
 }

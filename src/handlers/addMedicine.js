@@ -34,8 +34,6 @@ async function clearState(userId) {
 
 /**
  * Helper: edit the single bot message tracked in state.
- * If called from a callback query — use ctx.editMessageText.
- * If called after text input — use ctx.api.editMessageText with stored msgId.
  */
 async function editBotMsg(ctx, state, text, keyboard) {
   const opts = { parse_mode: 'Markdown', reply_markup: keyboard };
@@ -46,13 +44,10 @@ async function editBotMsg(ctx, state, text, keyboard) {
   }
 }
 
-/**
- * Silently delete a user message (ignore errors if can't delete)
- */
 async function deleteUserMsg(ctx) {
   try {
     await ctx.deleteMessage();
-  } catch { /* ignore — might not have permission */ }
+  } catch { /* ignore */ }
 }
 
 const ONBOARDING_NAV_KEYBOARD = new InlineKeyboard()
@@ -61,6 +56,64 @@ const ONBOARDING_NAV_KEYBOARD = new InlineKeyboard()
   .row()
   .text('📖 Помощь', 'help')
   .text('🏠 Главное меню', 'main_menu');
+
+// --- Progress bar helpers ---
+const STAGES = ['name', 'dosage', 'category', 'tags', 'expiry', 'quantity', 'photos', 'notes'];
+const STAGE_LABELS = {
+  name: 'Название',
+  dosage: 'Дозировка',
+  category: 'Категория',
+  tags: 'Теги',
+  expiry: 'Срок годности',
+  quantity: 'Количество',
+  photos: 'Фото',
+  notes: 'Заметки',
+};
+
+function stepToStage(step) {
+  if (step === 'name') return 'name';
+  if (step.startsWith('dosage') || step === 'dosage_unit' || step === 'dosage_value' || step === 'dosage_custom') return 'dosage';
+  if (step.startsWith('category')) return 'category';
+  if (step === 'tags') return 'tags';
+  if (step.startsWith('expiry')) return 'expiry';
+  if (step === 'quantity' || step === 'quantity_unit') return 'quantity';
+  if (step === 'photos') return 'photos';
+  if (step === 'notes') return 'notes';
+  if (step === 'confirm') return 'confirm';
+  return 'name';
+}
+
+function buildStageHeader(state) {
+  const stage = stepToStage(state.step);
+  if (stage === 'confirm') return '📋 *Проверьте данные:*';
+  const idx = STAGES.indexOf(stage);
+  const total = STAGES.length;
+  const filled = Math.round(((idx + 1) / total) * 14);
+  const bar = '▓'.repeat(filled) + '░'.repeat(14 - filled);
+  const label = STAGE_LABELS[stage] || stage;
+  return `💊 *Добавление в «${state.medkitName}»*\n${bar} ${label}`;
+}
+
+// --- Skip button labels ---
+const SKIP_LABELS = {
+  dosage_unit: '⏭ Без дозировки',
+  dosage_value: '⏭ Без дозировки',
+  dosage_custom: '⏭ Без дозировки',
+  category: '⏭ Без категории',
+  category_custom: '⏭ Без категории',
+  tags: '⏭ Без тегов',
+  expiry_year: '⏭ Без срока',
+  expiry_month: '⏭ Без срока',
+  expiry_day: '⏭ Без срока',
+  quantity: '⏭ Без количества',
+  quantity_unit: '⏭ Пропустить',
+  photos: '⏭ Без фото',
+  notes: '⏭ Без заметок',
+};
+
+function getSkipLabel(step) {
+  return SKIP_LABELS[step] || '⏭ Пропустить';
+}
 
 async function showCancelResult(ctx, fromOnboarding, medkitId) {
   if (fromOnboarding) {
@@ -91,7 +144,7 @@ export async function startAddMedicine(ctx, medkitId, options = {}) {
     medkitId,
     medkitName: medkit.name,
     fromOnboarding: options.fromOnboarding || false,
-    msgId: null, // will be set to the bot message we keep editing
+    msgId: null,
     data: {
       medkitId,
       name: null,
@@ -106,15 +159,14 @@ export async function startAddMedicine(ctx, medkitId, options = {}) {
     },
   };
 
-  // Edit the current message (from callback) — this becomes our single bot message
+  const header = buildStageHeader(state);
   await ctx.editMessageText(
-    `💊 *Добавление в «${medkit.name}»*\n\nШаг 1/8: Введите *название* лекарства:`,
+    `${header}\n\nВведите *название* лекарства:`,
     {
       parse_mode: 'Markdown',
       reply_markup: new InlineKeyboard().text('❌ Отмена', 'addmed:cancel'),
     }
   );
-  // Store the message ID so we can edit it later from text handlers
   state.msgId = ctx.callbackQuery.message.message_id;
   await setState(ctx.dbUser.id, state);
 }
@@ -130,7 +182,6 @@ export async function handleAddMedicineText(ctx) {
   const text = ctx.message.text.trim();
   const { step } = state;
 
-  // Delete the user's message immediately
   await deleteUserMsg(ctx);
 
   if (step === 'name') {
@@ -181,11 +232,11 @@ export async function handleAddMedicineText(ctx) {
       await setState(ctx.dbUser.id, state);
       await sendQuantityUnitPicker(ctx, state);
     } else {
-      // Show error in the bot message
+      const header = buildStageHeader(state);
       await editBotMsg(ctx, state,
-        'Шаг 6/8: Введите *количество* (число):\n\n⚠️ Некорректное число, попробуйте ещё раз.',
+        `${header}\n\nВведите *количество* (число):\n\n⚠️ Некорректное число, попробуйте ещё раз.`,
         new InlineKeyboard()
-          .text('⏭ Пропустить', 'addmed:skip').row()
+          .text(getSkipLabel('quantity'), 'addmed:skip').row()
           .text('❌ Отмена', 'addmed:cancel')
       );
     }
@@ -218,8 +269,9 @@ export async function handleAddMedicinePhoto(ctx) {
 
   if (state.data.photoFileIds.length < MAX_PHOTOS) {
     await setState(ctx.dbUser.id, state);
+    const header = buildStageHeader(state);
     await editBotMsg(ctx, state,
-      `Шаг 7/8: *Фото* лекарства (${state.data.photoFileIds.length}/${MAX_PHOTOS})\n\nОтправьте ещё или нажмите «Готово».`,
+      `${header}\n\n*Фото* лекарства (${state.data.photoFileIds.length}/${MAX_PHOTOS})\n\nОтправьте ещё или нажмите «Готово».`,
       new InlineKeyboard()
         .text('✅ Готово', 'addmed:photos_done')
         .row()
@@ -241,7 +293,6 @@ export async function handleAddMedicineCallback(ctx, action) {
   const state = await getState(ctx.dbUser.id);
   if (!state) return false;
 
-  // Update msgId from callback message (in case it wasn't set)
   if (ctx.callbackQuery.message) {
     state.msgId = ctx.callbackQuery.message.message_id;
   }
@@ -267,12 +318,13 @@ export async function handleAddMedicineCallback(ctx, action) {
     if (unit === 'другое') {
       state.step = 'dosage_custom';
       await setState(ctx.dbUser.id, state);
+      const header = buildStageHeader(state);
       await ctx.editMessageText(
-        'Шаг 2/8: Введите *дозировку* целиком (напр. «2 капли», «1 пакетик»):',
+        `${header}\n\nВведите *дозировку* целиком (напр. «2 капли», «1 пакетик»):`,
         {
           parse_mode: 'Markdown',
           reply_markup: new InlineKeyboard()
-            .text('⏭ Пропустить', 'addmed:skip').row()
+            .text(getSkipLabel('dosage_custom'), 'addmed:skip').row()
             .text('❌ Отмена', 'addmed:cancel'),
         }
       );
@@ -280,12 +332,13 @@ export async function handleAddMedicineCallback(ctx, action) {
       state.dosageUnit = unit;
       state.step = 'dosage_value';
       await setState(ctx.dbUser.id, state);
+      const header = buildStageHeader(state);
       await ctx.editMessageText(
-        `Шаг 2/8: Введите *количество* в *${unit}* (напр. 500):`,
+        `${header}\n\nВведите *количество* в *${unit}* (напр. 500):`,
         {
           parse_mode: 'Markdown',
           reply_markup: new InlineKeyboard()
-            .text('⏭ Пропустить', 'addmed:skip').row()
+            .text(getSkipLabel('dosage_value'), 'addmed:skip').row()
             .text('❌ Отмена', 'addmed:cancel'),
         }
       );
@@ -299,15 +352,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     await ctx.answerCallbackQuery();
     state.step = 'tags';
     await setState(ctx.dbUser.id, state);
-    await ctx.editMessageText(
-      'Шаг 4/8: Введите *теги* через запятую (напр. «для детей, рецептурное»):',
-      {
-        parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard()
-          .text('⏭ Пропустить', 'addmed:skip').row()
-          .text('❌ Отмена', 'addmed:cancel'),
-      }
-    );
+    await sendTagsPrompt(ctx, state);
     return true;
   }
 
@@ -315,12 +360,13 @@ export async function handleAddMedicineCallback(ctx, action) {
     await ctx.answerCallbackQuery();
     state.step = 'category_custom';
     await setState(ctx.dbUser.id, state);
+    const header = buildStageHeader(state);
     await ctx.editMessageText(
-      'Шаг 3/8: Введите *свою категорию*:',
+      `${header}\n\nВведите *свою категорию*:`,
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('⏭ Пропустить', 'addmed:skip').row()
+          .text(getSkipLabel('category_custom'), 'addmed:skip').row()
           .text('❌ Отмена', 'addmed:cancel'),
       }
     );
@@ -334,7 +380,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     state.step = 'expiry_month';
     await ctx.answerCallbackQuery();
     await setState(ctx.dbUser.id, state);
-    await sendExpiryMonthPicker(ctx, year);
+    await sendExpiryMonthPicker(ctx, state, year);
     return true;
   }
 
@@ -345,7 +391,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     state.step = 'expiry_day';
     await ctx.answerCallbackQuery();
     await setState(ctx.dbUser.id, state);
-    await sendExpiryDayPicker(ctx, state.expiryYear, month);
+    await sendExpiryDayPicker(ctx, state, state.expiryYear, month);
     return true;
   }
 
@@ -359,15 +405,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     state.data.expiryDate = `${y}-${m}-${d}`;
     state.step = 'quantity';
     await setState(ctx.dbUser.id, state);
-    await ctx.editMessageText(
-      'Шаг 6/8: Введите *количество* (число):',
-      {
-        parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard()
-          .text('⏭ Пропустить', 'addmed:skip').row()
-          .text('❌ Отмена', 'addmed:cancel'),
-      }
-    );
+    await sendQuantityPrompt(ctx, state);
     return true;
   }
 
@@ -379,15 +417,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     state.data.expiryDate = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
     state.step = 'quantity';
     await setState(ctx.dbUser.id, state);
-    await ctx.editMessageText(
-      'Шаг 6/8: Введите *количество* (число):',
-      {
-        parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard()
-          .text('⏭ Пропустить', 'addmed:skip').row()
-          .text('❌ Отмена', 'addmed:cancel'),
-      }
-    );
+    await sendQuantityPrompt(ctx, state);
     return true;
   }
 
@@ -397,15 +427,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     await ctx.answerCallbackQuery();
     state.step = 'photos';
     await setState(ctx.dbUser.id, state);
-    await ctx.editMessageText(
-      `Шаг 7/8: Отправьте *фото* лекарства (до ${MAX_PHOTOS} шт.):`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard()
-          .text('⏭ Пропустить', 'addmed:skip').row()
-          .text('❌ Отмена', 'addmed:cancel'),
-      }
-    );
+    await sendPhotosPrompt(ctx, state);
     return true;
   }
 
@@ -414,15 +436,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     await ctx.answerCallbackQuery();
     state.step = 'notes';
     await setState(ctx.dbUser.id, state);
-    await ctx.editMessageText(
-      'Шаг 8/8: Добавьте *заметки* (напр. «принимать после еды»):',
-      {
-        parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard()
-          .text('⏭ Пропустить', 'addmed:skip').row()
-          .text('❌ Отмена', 'addmed:cancel'),
-      }
-    );
+    await sendNotesPrompt(ctx, state);
     return true;
   }
 
@@ -513,7 +527,7 @@ async function advanceStep(ctx, state) {
 }
 
 // ============================================================
-// PROMPT SENDERS — all edit the single bot message
+// PROMPT SENDERS
 // ============================================================
 
 async function sendDosageUnitPicker(ctx, state) {
@@ -524,9 +538,10 @@ async function sendDosageUnitPicker(ctx, state) {
     if (DOSAGE_UNITS[i + 2]) keyboard.text(DOSAGE_UNITS[i + 2].label, `addmed:dosunit:${DOSAGE_UNITS[i + 2].value}`);
     keyboard.row();
   }
-  keyboard.text('⏭ Пропустить', 'addmed:skip').row();
+  keyboard.text(getSkipLabel('dosage_unit'), 'addmed:skip').row();
   keyboard.text('❌ Отмена', 'addmed:cancel');
-  await editBotMsg(ctx, state, 'Шаг 2/8: Выберите *единицу дозировки*:', keyboard);
+  const header = buildStageHeader(state);
+  await editBotMsg(ctx, state, `${header}\n\nВыберите *единицу дозировки*:`, keyboard);
 }
 
 async function sendCategoryPicker(ctx, state) {
@@ -537,16 +552,18 @@ async function sendCategoryPicker(ctx, state) {
     keyboard.row();
   }
   keyboard.text('✏️ Своя категория', 'addmed:cat_custom').row();
-  keyboard.text('⏭ Пропустить', 'addmed:skip').row();
+  keyboard.text(getSkipLabel('category'), 'addmed:skip').row();
   keyboard.text('❌ Отмена', 'addmed:cancel');
-  await editBotMsg(ctx, state, 'Шаг 3/8: Выберите *категорию*:', keyboard);
+  const header = buildStageHeader(state);
+  await editBotMsg(ctx, state, `${header}\n\nВыберите *категорию*:`, keyboard);
 }
 
 async function sendTagsPrompt(ctx, state) {
   const kb = new InlineKeyboard()
-    .text('⏭ Пропустить', 'addmed:skip').row()
+    .text(getSkipLabel('tags'), 'addmed:skip').row()
     .text('❌ Отмена', 'addmed:cancel');
-  await editBotMsg(ctx, state, 'Шаг 4/8: Введите *теги* через запятую (напр. «для детей, рецептурное»):', kb);
+  const header = buildStageHeader(state);
+  await editBotMsg(ctx, state, `${header}\n\nВведите *теги* через запятую (напр. «для детей, рецептурное»):`, kb);
 }
 
 async function sendExpiryYearPicker(ctx, state) {
@@ -557,49 +574,55 @@ async function sendExpiryYearPicker(ctx, state) {
     if (y + 1 <= currentYear + 7) keyboard.text(String(y + 1), `addmed:eyear:${y + 1}`);
     keyboard.row();
   }
-  keyboard.text('⏭ Пропустить', 'addmed:skip').row();
+  keyboard.text(getSkipLabel('expiry_year'), 'addmed:skip').row();
   keyboard.text('❌ Отмена', 'addmed:cancel');
-  await editBotMsg(ctx, state, 'Шаг 5/8: Выберите *год* срока годности:', keyboard);
+  const header = buildStageHeader(state);
+  await editBotMsg(ctx, state, `${header}\n\nВыберите *год* срока годности:`, keyboard);
 }
 
-async function sendExpiryMonthPicker(ctx, year) {
+async function sendExpiryMonthPicker(ctx, state, year) {
   const months = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
   const keyboard = new InlineKeyboard();
-  for (let i = 0; i < 12; i += 4) {
-    for (let j = i; j < i + 4 && j < 12; j++) {
+  // 3 months per row for better mobile display
+  for (let i = 0; i < 12; i += 3) {
+    for (let j = i; j < i + 3 && j < 12; j++) {
       keyboard.text(months[j], `addmed:emonth:${j + 1}`);
     }
     keyboard.row();
   }
-  keyboard.text('⏭ Пропустить', 'addmed:skip').row();
+  keyboard.text(getSkipLabel('expiry_month'), 'addmed:skip').row();
   keyboard.text('❌ Отмена', 'addmed:cancel');
-  await ctx.editMessageText(`Шаг 5/8: Выберите *месяц* (${year}):`, {
+  const header = buildStageHeader(state);
+  await ctx.editMessageText(`${header}\n\nВыберите *месяц* (${year}):`, {
     parse_mode: 'Markdown', reply_markup: keyboard,
   });
 }
 
-async function sendExpiryDayPicker(ctx, year, month) {
+async function sendExpiryDayPicker(ctx, state, year, month) {
   const daysInMonth = new Date(year, month, 0).getDate();
   const months = ['', 'Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
   const keyboard = new InlineKeyboard();
   keyboard.text(`Только ${months[month]} ${year}`, 'addmed:emonth_only').row();
-  for (let d = 1; d <= daysInMonth; d += 7) {
-    for (let j = d; j < d + 7 && j <= daysInMonth; j++) {
+  // 5 buttons per row instead of 7 for better mobile display
+  for (let d = 1; d <= daysInMonth; d += 5) {
+    for (let j = d; j < d + 5 && j <= daysInMonth; j++) {
       keyboard.text(String(j), `addmed:eday:${j}`);
     }
     keyboard.row();
   }
   keyboard.text('❌ Отмена', 'addmed:cancel');
-  await ctx.editMessageText(`Шаг 5/8: Выберите *день* (${months[month]} ${year}) или оставьте только месяц:`, {
+  const header = buildStageHeader(state);
+  await ctx.editMessageText(`${header}\n\nВыберите *день* (${months[month]} ${year}) или оставьте только месяц:`, {
     parse_mode: 'Markdown', reply_markup: keyboard,
   });
 }
 
 async function sendQuantityPrompt(ctx, state) {
   const kb = new InlineKeyboard()
-    .text('⏭ Пропустить', 'addmed:skip').row()
+    .text(getSkipLabel('quantity'), 'addmed:skip').row()
     .text('❌ Отмена', 'addmed:cancel');
-  await editBotMsg(ctx, state, 'Шаг 6/8: Введите *количество* (число):', kb);
+  const header = buildStageHeader(state);
+  await editBotMsg(ctx, state, `${header}\n\nВведите *количество* (число):`, kb);
 }
 
 async function sendQuantityUnitPicker(ctx, state) {
@@ -610,37 +633,42 @@ async function sendQuantityUnitPicker(ctx, state) {
     if (QUANTITY_UNITS[i + 2]) keyboard.text(QUANTITY_UNITS[i + 2].label, `addmed:qunit:${QUANTITY_UNITS[i + 2].value}`);
     keyboard.row();
   }
-  await editBotMsg(ctx, state, 'Шаг 6/8: Выберите *единицу измерения*:', keyboard);
+  const header = buildStageHeader(state);
+  await editBotMsg(ctx, state, `${header}\n\nВыберите *единицу измерения*:`, keyboard);
 }
 
 async function sendPhotosPrompt(ctx, state) {
   const kb = new InlineKeyboard()
-    .text('⏭ Пропустить', 'addmed:skip').row()
+    .text(getSkipLabel('photos'), 'addmed:skip').row()
     .text('❌ Отмена', 'addmed:cancel');
-  await editBotMsg(ctx, state, `Шаг 7/8: Отправьте *фото* лекарства (до ${MAX_PHOTOS} шт.):`, kb);
+  const header = buildStageHeader(state);
+  await editBotMsg(ctx, state, `${header}\n\nОтправьте *фото* лекарства (до ${MAX_PHOTOS} шт.):`, kb);
 }
 
 async function sendNotesPrompt(ctx, state) {
   const kb = new InlineKeyboard()
-    .text('⏭ Пропустить', 'addmed:skip').row()
+    .text(getSkipLabel('notes'), 'addmed:skip').row()
     .text('❌ Отмена', 'addmed:cancel');
-  await editBotMsg(ctx, state, 'Шаг 8/8: Добавьте *заметки* (напр. «принимать после еды»):', kb);
+  const header = buildStageHeader(state);
+  await editBotMsg(ctx, state, `${header}\n\nДобавьте *заметки* (напр. «принимать после еды»):`, kb);
 }
 
 async function sendConfirmation(ctx, state) {
   const d = state.data;
   let s = `📋 *Проверьте данные:*\n\n`;
   s += `💊 *Название:* ${d.name}\n`;
-  if (d.dosage) s += `💉 *Дозировка:* ${d.dosage}\n`;
-  if (d.category) s += `🏷 *Категория:* ${d.category}\n`;
-  if (d.tags.length > 0) s += `🏷 *Теги:* ${d.tags.join(', ')}\n`;
-  if (d.expiryDate) s += `📅 *Срок годности:* ${formatDate(d.expiryDate)}\n`;
-  s += `📏 *Количество:* ${formatQuantity(d.quantity, d.quantityUnit)}\n`;
+  s += d.dosage ? `💉 *Дозировка:* ${d.dosage}\n` : `💉 *Дозировка:* _не указана_\n`;
+  s += d.category ? `🏷 *Категория:* ${d.category}\n` : `🏷 *Категория:* _не указана_\n`;
+  s += d.tags.length > 0 ? `🏷 *Теги:* ${d.tags.join(', ')}\n` : `🏷 *Теги:* _не указаны_\n`;
+  s += d.expiryDate ? `📅 *Срок годности:* ${formatDate(d.expiryDate)}\n` : `📅 *Срок годности:* _не указан_\n`;
+  s += `📏 *Количество:* ${d.quantity > 0 ? formatQuantity(d.quantity, d.quantityUnit) : '_не указано_'}\n`;
   if (d.photoFileIds.length > 0) s += `📷 *Фото:* ${d.photoFileIds.length} шт.\n`;
-  if (d.notes) s += `📝 *Заметки:* ${d.notes}\n`;
+  s += d.notes ? `📝 *Заметки:* ${d.notes}\n` : `📝 *Заметки:* _нет_\n`;
 
   const kb = new InlineKeyboard()
     .text('✅ Сохранить', 'addmed:confirm')
+    .text('✏️ Изменить', 'addmed:reject')
+    .row()
     .text('❌ Отмена', 'addmed:reject');
   await editBotMsg(ctx, state, s, kb);
 }

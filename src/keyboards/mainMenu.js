@@ -9,5 +9,7 @@ export function mainMenuKeyboard() {
     .text('🔍 Поиск', 'search')
     .row()
     .text('📊 Статистика', 'stats')
-    .text('⚙️ Настройки', 'settings');
+    .text('⚙️ Настройки', 'settings')
+    .row()
+    .text('📖 Помощь', 'help');
 }

@@ -76,16 +76,31 @@ export function formatQuantity(quantity, unit) {
 }
 
 /**
- * Format expiry info for display
+ * Format expiry info for display.
+ * Only shows "осталось N дн." when within threshold (default 30 days).
  */
-export function formatExpiry(expiryDate, dateFormat) {
+export function formatExpiry(expiryDate, dateFormat, thresholdDays = 30) {
   if (!expiryDate) return 'не указан';
   const days = daysUntil(expiryDate);
   const formatted = formatDate(expiryDate, dateFormat);
 
   if (days <= 0) return `${formatted} (ПРОСРОЧЕНО)`;
-  if (days <= 30) return `${formatted} (осталось ${days} дн.)`;
-  return `${formatted} (осталось ${days} дн.)`;
+  if (days <= thresholdDays) return `${formatted} (осталось ${days} дн.)`;
+  return formatted;
+}
+
+/**
+ * Visual progress bar using block characters.
+ * @param {number} current - current value
+ * @param {number} total - total value
+ * @param {number} width - bar width in characters (default 10)
+ * @returns {string} e.g. "██████░░░░"
+ */
+export function formatProgressBar(current, total, width = 10) {
+  if (total <= 0) return '░'.repeat(width);
+  const ratio = Math.max(0, Math.min(1, current / total));
+  const filled = Math.round(ratio * width);
+  return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
 
 /**

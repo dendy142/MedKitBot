@@ -1,6 +1,8 @@
 import { InlineKeyboard } from 'grammy';
 import { getIntakeLogsForPeriod } from '../db/queries/intakeLogs.js';
 import { getUserActiveSchedules } from '../db/queries/schedules.js';
+import { DEFAULT_TIMEZONE } from '../config.js';
+import { formatProgressBar } from '../utils/format.js';
 
 const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
@@ -148,7 +150,7 @@ async function showStatsMenu(ctx) {
  * Show stats for a specific period
  */
 async function showStatsForPeriod(ctx, period) {
-  const timezone = ctx.dbUser.timezone || 'Etc/GMT-3';
+  const timezone = ctx.dbUser.timezone || DEFAULT_TIMEZONE;
   const { start, end } = getDateRange(period, timezone);
   const periodLabel = getPeriodLabel(period, start, end);
 
@@ -193,11 +195,14 @@ async function showStatsForPeriod(ctx, period) {
     totalTaken += taken;
 
     const label = med.dosage ? `${med.name} ${med.dosage}` : med.name;
-    let line = `💊 ${label}: ${taken}/${planned} (${pct}%)`;
+    const bar = formatProgressBar(taken, planned);
+    let line = `💊 ${label}: ${bar} ${taken}/${planned} (${pct}%)`;
 
     const streak = calculateStreak(med.logs, timezone);
     if (streak > 0) {
-      line += `\n   🔥 Стрик: ${streak} ${getDaysWord(streak)} подряд`;
+      const streakEmoji = streak >= 7 ? '🔥🔥' : '🔥';
+      const streakSuffix = streak >= 7 ? ' Отличный результат!' : '';
+      line += `\n   ${streakEmoji} Стрик: ${streak} ${getDaysWord(streak)} подряд${streakSuffix}`;
     }
 
     // Day-by-day visual only for week period
@@ -215,7 +220,8 @@ async function showStatsForPeriod(ctx, period) {
 
   let text = `📊 *Статистика за ${periodLabel}*\n\n`;
   text += lines.join('\n\n');
-  text += `\n\n📈 Общее: ${totalTaken}/${totalPlanned} (${totalPct}%)`;
+  const totalBar = formatProgressBar(totalTaken, totalPlanned);
+  text += `\n\n📈 Общее: ${totalBar} ${totalTaken}/${totalPlanned} (${totalPct}%)`;
 
   const keyboard = new InlineKeyboard()
     .text('◀️ Назад', 'stats');

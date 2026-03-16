@@ -87,6 +87,9 @@ export const TIMEZONES = [
   { value: 'Etc/GMT-12', label: 'UTC+12' },
 ];
 
+// Default timezone
+export const DEFAULT_TIMEZONE = 'Europe/Moscow';
+
 // Pagination
 export const PAGE_SIZE = 8;
 

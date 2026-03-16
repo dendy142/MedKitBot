@@ -35,7 +35,10 @@ async function showShoppingList(ctx, page = 0) {
 
   const keyboard = new InlineKeyboard();
   for (const item of pageItems) {
-    keyboard.text(`✅ ${item.name}`, `shop:bought:${item.id}`).row();
+    keyboard
+      .text(`✅ ${item.name}`, `shop:bought:${item.id}`)
+      .text('🗑', `shop:del:${item.id}`)
+      .row();
   }
 
   addPagination(keyboard, page, items.length, 'shop');
@@ -72,18 +75,25 @@ export function registerShoppingHandlers(bot) {
 
   // Share shopping list as plain text message
   bot.callbackQuery('shop:share', async (ctx) => {
-    await ctx.answerCallbackQuery();
     const items = await getShoppingList(ctx.dbUser.id);
     if (items.length === 0) {
       await ctx.answerCallbackQuery('Список пуст');
       return;
     }
+    await ctx.answerCallbackQuery('Список отправлен ниже');
     let text = '🛒 Список покупок:\n\n';
     for (const item of items) {
       text += `• ${item.name}\n`;
     }
     // Send as new message (can be forwarded)
     await ctx.reply(text);
+  });
+
+  // Delete individual item
+  bot.callbackQuery(/^shop:del:([0-9a-f-]+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery('Удалено');
+    await removeFromShoppingList(ctx.match[1]);
+    await showShoppingList(ctx);
   });
 
   // Mark as bought

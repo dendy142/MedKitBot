@@ -270,10 +270,12 @@ export async function handleScheduleText(ctx) {
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
+          .text('0.5', 'sched:dose:0.5')
           .text('1', 'sched:dose:1')
           .text('2', 'sched:dose:2')
           .text('3', 'sched:dose:3')
           .row()
+          .text('◀️ Назад', `sched:${state.medId}:create`)
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -288,10 +290,12 @@ export async function handleScheduleText(ctx) {
         '⚠️ Введите положительное число:',
         {
           reply_markup: new InlineKeyboard()
+            .text('0.5', 'sched:dose:0.5')
             .text('1', 'sched:dose:1')
             .text('2', 'sched:dose:2')
             .text('3', 'sched:dose:3')
             .row()
+            .text('◀️ Назад', `sched:${state.medId}:create`)
             .text('❌ Отмена', `med:${state.medId}:schedule`),
         }
       );
@@ -312,6 +316,7 @@ export async function handleScheduleText(ctx) {
           .row()
           .text('По дням недели', 'sched:freq:weekly')
           .row()
+          .text('◀️ Назад', `sched:${state.medId}:create`)
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
@@ -354,9 +359,11 @@ export async function handleScheduleText(ctx) {
 
     const [, day, month, year] = dateMatch;
     const d = new Date(Number(year), Number(month) - 1, Number(day));
-    if (isNaN(d.getTime()) || d <= new Date()) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (isNaN(d.getTime()) || d < today) {
       await ctx.api.editMessageText(chatId, msgId,
-        '⚠️ Дата должна быть в будущем. Введите в формате ДД.ММ.ГГГГ:',
+        '⚠️ Дата должна быть сегодня или позже. Введите в формате ДД.ММ.ГГГГ:',
         {
           reply_markup: new InlineKeyboard()
             .text('❌ Отмена', `med:${state.medId}:schedule`),
@@ -472,18 +479,20 @@ export function registerScheduleHandlers(bot) {
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
+          .text('0.5', 'sched:dose:0.5')
           .text('1', 'sched:dose:1')
           .text('2', 'sched:dose:2')
           .text('3', 'sched:dose:3')
           .row()
+          .text('◀️ Назад', `sched:${state.medId}:create`)
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );
   });
 
   // Quick dose buttons
-  bot.callbackQuery(/^sched:dose:(\d+)$/, async (ctx) => {
-    const dose = parseInt(ctx.match[1], 10);
+  bot.callbackQuery(/^sched:dose:([\d.]+)$/, async (ctx) => {
+    const dose = parseFloat(ctx.match[1]);
     await ctx.answerCallbackQuery();
     const state = await getWizardState(ctx.dbUser.id);
     if (!state || state.action !== 'create_schedule') return;
@@ -502,6 +511,7 @@ export function registerScheduleHandlers(bot) {
           .row()
           .text('По дням недели', 'sched:freq:weekly')
           .row()
+          .text('◀️ Назад', `sched:${state.medId}:create`)
           .text('❌ Отмена', `med:${state.medId}:schedule`),
       }
     );

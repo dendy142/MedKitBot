@@ -3,7 +3,7 @@ import { getTodayIntakeLogs, markIntakeTaken, markIntakeSkipped } from '../db/qu
 import { getMedicine, updateMedicine } from '../db/queries/medicines.js';
 import { getSchedule } from '../db/queries/schedules.js';
 import { supabase } from '../db/supabase.js';
-import { formatQuantity } from '../utils/format.js';
+import { formatQuantity, formatProgressBar } from '../utils/format.js';
 
 /**
  * Format time string from ISO or HH:MM
@@ -68,7 +68,8 @@ async function buildTodayView(userId, timezone) {
       if (log.status === 'pending' || log.status === 'snoozed') {
         keyboard
           .text(`✅ ${name}`, `intake:${log.id}:take`)
-          .text('❌ Пропуск', `intake:${log.id}:skip`)
+          .text('❌', `intake:${log.id}:skip`)
+          .text('📝', `intake:${log.id}:note`)
           .row();
       }
     }
@@ -81,7 +82,8 @@ async function buildTodayView(userId, timezone) {
   const skipped = logs.filter(l => l.status === 'skipped').length;
   const pending = logs.filter(l => l.status === 'pending' || l.status === 'snoozed').length;
 
-  text += `📊 Итого: ${taken}/${total} принято`;
+  const bar = formatProgressBar(taken, total);
+  text += `📊 ${bar} ${taken}/${total} принято`;
   if (skipped > 0) text += `, ${skipped} пропущено`;
   if (pending > 0) text += `, ${pending} ожидает`;
 

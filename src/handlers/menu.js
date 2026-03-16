@@ -52,7 +52,7 @@ async function buildDashboard(userId, settings) {
   const intakeLogs = await getTodayIntakeLogs(userId, settings?.timezone || 'Europe/Moscow');
   const totalIntakes = intakeLogs.length;
   const doneIntakes = intakeLogs.filter(l => l.status === 'taken').length;
-  const pendingIntakes = totalIntakes - doneIntakes - intakeLogs.filter(l => l.status === 'skipped').length;
+  const pendingIntakes = intakeLogs.filter(l => l.status === 'pending' || l.status === 'snoozed').length;
 
   let text = `🏠 *Главное меню*\n\n`;
 
@@ -79,7 +79,7 @@ async function buildDashboard(userId, settings) {
       const med = expiringMeds[i];
       const days = daysUntil(med.expiry_date);
       if (days <= 0) {
-        text += `  • ${med.name} — ПРОСРОЧЕНО\n`;
+        text += `  • ${med.name} — ❌ просрочено\n`;
       } else {
         text += `  • ${med.name} (через ${days} ${getDaysWord(days)})\n`;
       }
@@ -106,11 +106,11 @@ async function buildDashboard(userId, settings) {
 
   const hasIssues = expiringMeds.length > 0 || lowStockMeds.length > 0 || totalIntakes > 0 || shopCount > 0;
   if (medkitCount > 0 && !hasIssues) {
-    text += `\n✨ Всё в порядке!`;
+    text += `\n✨ Всё в порядке — ваши аптечки под контролем!`;
   }
 
   // P3.2: Always show search hint
-  text += `\n💡 _Напишите название лекарства для быстрого поиска_`;
+  text += `\n\n💡 _Напишите название для поиска_`;
 
   // P1.3: Build dynamic keyboard with quick actions
   const keyboard = new InlineKeyboard();

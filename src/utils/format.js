@@ -52,8 +52,8 @@ export function medicineStatusEmoji(medicine, thresholds) {
   // Low stock
   const lowCount = thresholds?.low_stock_count || 5;
   const lowPercent = thresholds?.low_stock_percent || 20;
-  if (medicine.quantity <= lowCount) return '📉';
-  if (medicine.initial_quantity > 0 && (medicine.quantity / medicine.initial_quantity) * 100 <= lowPercent) return '📉';
+  if (medicine.quantity > 0 && medicine.quantity <= lowCount) return '📉';
+  if (medicine.quantity > 0 && medicine.initial_quantity > 0 && (medicine.quantity / medicine.initial_quantity) * 100 <= lowPercent) return '📉';
 
   return '✅';
 }
@@ -85,7 +85,7 @@ export function formatExpiry(expiryDate, dateFormat, thresholdDays = 30) {
   const formatted = formatDate(expiryDate, dateFormat);
 
   if (days <= 0) return `${formatted} ❌ просрочено`;
-  if (days <= thresholdDays) return `${formatted} (${days} дн.)`;
+  if (days <= thresholdDays) return `${formatted} (${days} ${getDaysWord(days)})`;
   return formatted;
 }
 

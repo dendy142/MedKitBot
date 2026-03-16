@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getUserMedkits, getMedkit, createMedkit, renameMedkit, deleteMedkit, countMedkitMedicinesBatch } from '../db/queries/medkits.js';
 import { getMedkitMedicines } from '../db/queries/medicines.js';
 import { addPagination, paginateItems } from '../keyboards/pagination.js';
-import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil } from '../utils/format.js';
+import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil, getMedWord } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
 import { startAddMedicine, startQuickAdd } from './addMedicine.js';
 import { supabase } from '../db/supabase.js';
@@ -137,7 +137,7 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
   text += formatMedicineList(pageItems, settings);
 
   if (medicines.length === 0 && !filterField) {
-    text += '_Аптечка пуста. Добавьте первое лекарство!_\n';
+    text += '_Пока пусто. Нажмите ➕ чтобы добавить первое лекарство!_\n';
   } else if (medicines.length === 0 && filterField) {
     text += '_Нет лекарств по этому фильтру._\n';
   }
@@ -301,7 +301,7 @@ export function registerMedkitHandlers(bot) {
     const medicines = await getMedkitMedicines(medkitId);
     const medCount = medicines.length;
     let warning = `🗑 Вы уверены, что хотите удалить аптечку «${medkit.name}»?\n\n`;
-    warning += `⚠️ Будет удалено: ${medCount} лекарств${medCount === 1 ? 'о' : medCount < 5 ? 'а' : ''}`;
+    warning += `⚠️ Будет удалено: ${medCount} ${getMedWord(medCount)}`;
     warning += `, а также все связанные расписания и логи приёма.`;
 
     await ctx.editMessageText(warning, {
@@ -362,7 +362,9 @@ export function registerMedkitHandlers(bot) {
 
     const pageItems = paginateItems(medicines, 0);
 
-    let text = `📦 *${medkit.name}* (${medicines.length})\n\n`;
+    const sortLabels = { name: 'по названию', expiry: 'по сроку', category: 'по категории', quantity: 'по остатку', problems: 'проблемные' };
+    let text = `📦 *${medkit.name}* (${medicines.length})\n`;
+    text += `🔀 Сортировка: ${sortLabels[sortBy] || sortBy}\n\n`;
     text += formatMedicineList(pageItems, settings);
 
     const keyboard = buildMedkitKeyboard(medkitId, pageItems, 0, medicines.length);

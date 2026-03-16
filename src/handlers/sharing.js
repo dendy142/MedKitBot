@@ -562,7 +562,7 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
     await ctx.reply(
       '❌ Приглашение недействительно или срок его действия истёк.',
       {
-        reply_markup: new InlineKeyboard().text('🏠 Главное меню', 'main_menu'),
+        reply_markup: new InlineKeyboard().text('🏠 Меню', 'main_menu'),
       }
     );
     return;
@@ -578,7 +578,7 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
       {
         reply_markup: new InlineKeyboard()
           .text('📦 Открыть', `medkit:${invitation.medkit_id}`)
-          .text('🏠 Главное меню', 'main_menu'),
+          .text('🏠 Меню', 'main_menu'),
       }
     );
     return;
@@ -589,7 +589,7 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
     await ctx.reply(
       '❌ Это приглашение предназначено для другого пользователя.',
       {
-        reply_markup: new InlineKeyboard().text('🏠 Главное меню', 'main_menu'),
+        reply_markup: new InlineKeyboard().text('🏠 Меню', 'main_menu'),
       }
     );
     return;
@@ -600,7 +600,7 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
     await ctx.reply(
       'ℹ️ Вы являетесь владельцем этой аптечки.',
       {
-        reply_markup: new InlineKeyboard().text('🏠 Главное меню', 'main_menu'),
+        reply_markup: new InlineKeyboard().text('🏠 Меню', 'main_menu'),
       }
     );
     return;
@@ -612,7 +612,7 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
     await ctx.reply(
       '❌ Не удалось принять приглашение. Попробуйте позже.',
       {
-        reply_markup: new InlineKeyboard().text('🏠 Главное меню', 'main_menu'),
+        reply_markup: new InlineKeyboard().text('🏠 Меню', 'main_menu'),
       }
     );
     return;
@@ -623,7 +623,7 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
     {
       reply_markup: new InlineKeyboard()
         .text('📦 Открыть', `medkit:${invitation.medkit_id}`)
-        .text('🏠 Главное меню', 'main_menu'),
+        .text('🏠 Меню', 'main_menu'),
     }
   );
 

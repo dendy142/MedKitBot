@@ -258,10 +258,11 @@ export async function handleTextState(ctx) {
   if (state.action === 'intake_note') {
     await clearState(ctx.dbUser.id);
     try {
+      // markIntakeTaken handles both pending→taken and updating note on already-taken
       await markIntakeTaken(state.logId, text);
       await editBotMsg(ctx, msgId,
         `✅ Приём отмечен с заметкой: _${text}_`,
-        new InlineKeyboard().text('💊 К приёмам', 'intake_today').text('◀️ Меню', 'main_menu')
+        new InlineKeyboard().text('💊 К приёмам', 'intake_today').text('🏠 Меню', 'main_menu')
       );
     } catch (e) {
       console.error('Error adding intake note:', e);

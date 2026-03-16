@@ -10,9 +10,8 @@ import { formatQuantity, formatProgressBar } from '../utils/format.js';
  */
 function formatTime(plannedAt, timezone = 'Europe/Moscow') {
   const d = new Date(plannedAt);
-  const hh = String(d.toLocaleString('en-US', { hour: '2-digit', hour12: false, timeZone: timezone })).padStart(2, '0');
-  const mm = String(d.toLocaleString('en-US', { minute: '2-digit', timeZone: timezone })).padStart(2, '0');
-  return `${hh}:${mm}`;
+  const fmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone });
+  return fmt.format(d);
 }
 
 /**

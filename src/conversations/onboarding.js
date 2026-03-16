@@ -14,7 +14,7 @@ import { createMedkit } from '../db/queries/medkits.js';
 export async function onboardingConversation(conversation, ctx) {
   // Step 1: Welcome
   await ctx.reply(
-    `👋 *Добро пожаловать в Medkit Bot!*\n\n` +
+    `👋 *Добро пожаловать в «Моя аптечка»!*\n\n` +
     `Я помогу вам управлять домашней аптечкой:\n` +
     `• 📦 Вести каталог лекарств\n` +
     `• 📅 Отслеживать сроки годности\n` +

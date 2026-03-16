@@ -54,7 +54,7 @@ async function buildDashboard(userId, settings) {
   const doneIntakes = intakeLogs.filter(l => l.status === 'taken').length;
   const pendingIntakes = intakeLogs.filter(l => l.status === 'pending' || l.status === 'snoozed').length;
 
-  let text = `🏠 *Главное меню*\n\n`;
+  let text = `🏠 *Меню*\n\n`;
 
   if (medkitCount === 0) {
     text += `📦 У вас пока нет аптечек — создайте первую!\n`;

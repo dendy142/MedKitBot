@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { TIMEZONES, DEFAULT_SETTINGS } from '../config.js';
 import { updateUserSettings, updateUserTimezone } from '../db/queries/users.js';
 import { supabase } from '../db/supabase.js';
+import { getDaysWord } from '../utils/format.js';
 
 const SORT_LABELS = {
   name: 'По имени',
@@ -124,7 +125,7 @@ export function registerSettingsHandlers(bot) {
   function buildThresholdView(t) {
     const check = (val, current) => val === current ? ' ✅' : '';
     const text = `📐 *Пороги предупреждений*\n\n` +
-      `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
+      `📅 Срок годности: за *${t.expiry_days}* ${getDaysWord(t.expiry_days)}\n` +
       `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
     const keyboard = new InlineKeyboard()
       .text(`📅 14 дн.${check(14, t.expiry_days)}`, 'set:thresh:expiry:14')

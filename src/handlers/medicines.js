@@ -199,7 +199,7 @@ export function registerMedicineHandlers(bot) {
     // P2.6: Adapt restock buttons to quantity_unit
     const unit = med.quantity_unit || 'шт';
     let amounts;
-    if (unit === 'мл' || unit === 'капель') {
+    if (unit === 'мл' || unit === 'капли') {
       amounts = [10, 50, 100, 250];
     } else if (unit === 'таблеток' || unit === 'капсул') {
       amounts = [10, 20, 30, 60];

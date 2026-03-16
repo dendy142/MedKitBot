@@ -279,7 +279,7 @@ export async function handleAddMedicineText(ctx) {
     if (text.length > 50) {
       const header = buildStageHeader(state);
       await editBotMsg(ctx, state,
-        `${header}\n\nВведите *количество* в *${state.dosageUnit}*:\n\n⚠️ Слишком длинное значение (макс. 50 символов).`,
+        `${header}\n\nВведите *дозировку* в *${state.dosageUnit}*:\n\n⚠️ Слишком длинное значение (макс. 50 символов).`,
         new InlineKeyboard().text(getSkipLabel('dosage_value'), 'addmed:skip').row().text('❌ Отмена', 'addmed:cancel')
       );
       return true;
@@ -498,7 +498,7 @@ export async function handleAddMedicineCallback(ctx, action) {
       await setState(ctx.dbUser.id, state);
       const header = buildStageHeader(state);
       await ctx.editMessageText(
-        `${header}\n\nВведите *количество* в *${unit}* (напр. 500):`,
+        `${header}\n\nВведите *дозировку* в *${unit}* (напр. 500):`,
         {
           parse_mode: 'Markdown',
           reply_markup: new InlineKeyboard()

@@ -33,17 +33,17 @@ export async function handleSearch(ctx) {
     // P1.6: Quick add from search "not found"
     const medkits = await getUserMedkits(ctx.dbUser.id);
     if (medkits.length === 1) {
-      const safeName = query.slice(0, 40);
+      const safeName = query.slice(0, 40).replace(/:/g, '');
       keyboard.text(`➕ Добавить «${safeName}»`, `search:add:${medkits[0].id}:${safeName}`).row();
     } else if (medkits.length > 1) {
-      const safeName = query.slice(0, 40);
+      const safeName = query.slice(0, 40).replace(/:/g, '');
       keyboard.text(`➕ Добавить «${safeName}»`, `search:addpick:${safeName}`).row();
     }
 
     keyboard.text('📦 Аптечки', 'medkits')
       .text('🔍 Искать ещё', 'search')
       .row()
-      .text('◀️ Главное меню', 'main_menu');
+      .text('🏠 Меню', 'main_menu');
 
     await ctx.reply(
       `🔍 По запросу «${query}» ничего не найдено.\n\nПопробуйте другой запрос.`,
@@ -78,7 +78,7 @@ export async function handleSearch(ctx) {
   }
 
   keyboard.text('🔍 Искать ещё', 'search').row();
-  keyboard.text('◀️ Главное меню', 'main_menu');
+  keyboard.text('🏠 Меню', 'main_menu');
 
   await ctx.reply(text, {
     parse_mode: 'Markdown',

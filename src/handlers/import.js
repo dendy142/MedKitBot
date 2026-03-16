@@ -17,7 +17,7 @@ async function getState(userId) {
 async function setState(userId, value) {
   await supabase
     .from('sessions')
-    .upsert({ key: `state:${userId}`, value }, { onConflict: 'key' });
+    .upsert({ key: `state:${userId}`, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
 }
 
 async function clearState(userId) {

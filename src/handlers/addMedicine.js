@@ -63,7 +63,7 @@ const ONBOARDING_NAV_KEYBOARD = new InlineKeyboard()
   .text('⚙️ Настройки', 'settings')
   .row()
   .text('📖 Помощь', 'help')
-  .text('🏠 Главное меню', 'main_menu');
+  .text('🏠 Меню', 'main_menu');
 
 // --- Progress bar helpers ---
 const STAGES = ['name', 'dosage', 'category', 'tags', 'expiry', 'quantity', 'photos', 'notes'];
@@ -981,11 +981,11 @@ async function sendConfirmation(ctx, state) {
   s += `💊 *Название:* ${d.name}\n`;
   s += d.dosage ? `💉 *Дозировка:* ${d.dosage}\n` : `💉 *Дозировка:* —\n`;
   s += d.category ? `🏷 *Категория:* ${d.category}\n` : `🏷 *Категория:* —\n`;
-  s += d.tags.length > 0 ? `🔖 *Теги:* ${d.tags.join(', ')}\n` : '';
+  s += d.tags.length > 0 ? `🔖 *Теги:* ${d.tags.join(', ')}\n` : `🔖 *Теги:* —\n`;
   s += d.expiryDate ? `📅 *Срок:* ${formatDate(d.expiryDate)}\n` : `📅 *Срок:* —\n`;
   s += `📏 *Кол-во:* ${d.quantity > 0 ? formatQuantity(d.quantity, d.quantityUnit) : '—'}\n`;
-  if (d.photoFileIds.length > 0) s += `📷 *Фото:* ${d.photoFileIds.length} шт.\n`;
-  if (d.notes) s += `📝 *Заметки:* ${d.notes}\n`;
+  s += d.photoFileIds.length > 0 ? `📷 *Фото:* ${d.photoFileIds.length} шт.\n` : `📷 *Фото:* —\n`;
+  s += d.notes ? `📝 *Заметки:* ${d.notes}\n` : `📝 *Заметки:* —\n`;
 
   s += '\n_Нажмите на поле, чтобы изменить:_';
 

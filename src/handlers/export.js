@@ -132,7 +132,7 @@ export function registerExportHandlers(bot) {
     await showExportMenu(ctx);
   });
 
-  bot.callbackQuery(/^export:(.+)$/, async (ctx) => {
+  bot.callbackQuery(/^export:([0-9a-f-]+|all)$/, async (ctx) => {
     const target = ctx.match[1];
     await handleExportSelect(ctx, target);
   });

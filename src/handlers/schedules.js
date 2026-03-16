@@ -179,13 +179,23 @@ async function showConfirmation(ctx, state, msgId) {
     durStr = `📅 До ${state.durationValue}`;
   }
 
+  let stockInfo = `📏 Остаток: ${formatQuantity(med.quantity, med.quantity_unit)}`;
+  if (state.durationType === 'days' && state.frequency !== 'weekly') {
+    const dailyDose = state.frequency === 'every_other_day' ? state.dosePerIntake / 2 : state.dosePerIntake;
+    const totalNeeded = dailyDose * state.durationValue;
+    if (totalNeeded > med.quantity) {
+      stockInfo += ` ⚠️ _может не хватить_`;
+    }
+  }
+
   const text =
     `📋 *Подтверждение курса*\n\n` +
     `💊 ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n` +
     `⏰ ${timeStr}\n` +
     `💊 Доза: ${state.dosePerIntake} ${med.quantity_unit}\n` +
     `🔄 ${freqStr}\n` +
-    `📅 ${durStr}\n\n` +
+    `📅 ${durStr}\n` +
+    `${stockInfo}\n\n` +
     `Всё верно?`;
 
   const keyboard = new InlineKeyboard()

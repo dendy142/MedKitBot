@@ -83,12 +83,8 @@ export function registerSettingsHandlers(bot) {
   });
 
   // --- Notifications ---
-  bot.callbackQuery('set:notif', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
-    const n = s.notifications || DEFAULT_SETTINGS.notifications;
-
-    const keyboard = new InlineKeyboard()
+  function buildNotificationKeyboard(n) {
+    return new InlineKeyboard()
       .text(`${n.intake_reminders ? '✅' : '❌'} Напоминания о приёме`, 'set:notif:intake_reminders')
       .row()
       .text(`${n.expiry_alerts ? '✅' : '❌'} Сроки годности`, 'set:notif:expiry_alerts')
@@ -98,10 +94,15 @@ export function registerSettingsHandlers(bot) {
       .text(`${n.shared_medkit_changes ? '✅' : '❌'} Общие аптечки`, 'set:notif:shared_medkit_changes')
       .row()
       .text('◀️ Назад', 'settings');
+  }
 
+  bot.callbackQuery('set:notif', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+    const n = s.notifications || DEFAULT_SETTINGS.notifications;
     await ctx.editMessageText('🔔 *Уведомления*\n\nНажмите чтобы вкл/выкл:', {
       parse_mode: 'Markdown',
-      reply_markup: keyboard,
+      reply_markup: buildNotificationKeyboard(n),
     });
   });
 
@@ -113,23 +114,9 @@ export function registerSettingsHandlers(bot) {
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
     await ctx.answerCallbackQuery(s.notifications[key] ? 'Включено' : 'Выключено');
-
-    // Re-render notifications menu
-    const n = s.notifications;
-    const keyboard = new InlineKeyboard()
-      .text(`${n.intake_reminders ? '✅' : '❌'} Напоминания о приёме`, 'set:notif:intake_reminders')
-      .row()
-      .text(`${n.expiry_alerts ? '✅' : '❌'} Сроки годности`, 'set:notif:expiry_alerts')
-      .row()
-      .text(`${n.low_stock_alerts ? '✅' : '❌'} Остатки`, 'set:notif:low_stock_alerts')
-      .row()
-      .text(`${n.shared_medkit_changes ? '✅' : '❌'} Общие аптечки`, 'set:notif:shared_medkit_changes')
-      .row()
-      .text('◀️ Назад', 'settings');
-
     await ctx.editMessageText('🔔 *Уведомления*\n\nНажмите чтобы вкл/выкл:', {
       parse_mode: 'Markdown',
-      reply_markup: keyboard,
+      reply_markup: buildNotificationKeyboard(s.notifications),
     });
   });
 
@@ -220,7 +207,8 @@ export function registerSettingsHandlers(bot) {
         period,
         msgId: msg.message_id,
       },
-    });
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'key' });
   });
 
   // --- Digest Settings ---
@@ -258,7 +246,8 @@ export function registerSettingsHandlers(bot) {
         action: 'set_digest_time',
         msgId: msg.message_id,
       },
-    });
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'key' });
   });
 
   // --- Display ---

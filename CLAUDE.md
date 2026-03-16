@@ -12,7 +12,7 @@ Telegram bot @my_med_kit_bot for managing home medicine cabinets. Russian-only i
 - **Bot framework**: grammY (Telegram Bot API)
 - **Database**: Supabase PostgreSQL (service role key, no RLS enforcement)
 - **Hosting**: Vercel serverless (webhook at `api/webhook.js`)
-- **Cron**: Vercel Cron Jobs (`api/cron/expiry-check.js` daily at 6am, `api/cron/reminders.js` every 5 min, `api/cron/digest.js` hourly)
+- **Cron**: Triggered externally via cron-job.org (NOT Vercel Cron). Files `api/cron/reminders.js` (every 5 min), `api/cron/digest.js` (hourly), `api/cron/expiry-check.js` (daily 6am) are endpoints called by the external service. These cron files should not be modified — they work correctly as-is.
 
 ## Commands
 

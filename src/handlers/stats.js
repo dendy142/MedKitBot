@@ -137,7 +137,7 @@ async function showStatsMenu(ctx) {
     .text('Месяц', 'stats:month')
     .text('Всё время', 'stats:all')
     .row()
-    .text('◀️ Назад', 'main_menu');
+    .text('🏠 Меню', 'main_menu');
 
   if (ctx.callbackQuery) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -161,9 +161,10 @@ async function showStatsForPeriod(ctx, period) {
   );
 
   if (!logs.length) {
-    const text = `📊 *Статистика за ${periodLabel}*\n\nНет данных о приёмах за этот период.`;
+    const text = `📊 *Статистика за ${periodLabel}*\n\n_Нет данных за этот период. Создайте курс приёма, чтобы отслеживать статистику._`;
     const keyboard = new InlineKeyboard()
-      .text('◀️ Назад', 'stats');
+      .text('◀️ Назад', 'stats')
+      .text('🏠 Меню', 'main_menu');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
     return;
   }
@@ -235,7 +236,8 @@ async function showStatsForPeriod(ctx, period) {
   }
 
   const keyboard = new InlineKeyboard()
-    .text('◀️ Назад', 'stats');
+    .text('◀️ Назад', 'stats')
+    .text('🏠 Меню', 'main_menu');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }

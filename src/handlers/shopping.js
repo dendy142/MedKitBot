@@ -117,8 +117,9 @@ export function registerShoppingHandlers(bot) {
     if (item?.medicine_id) {
       const med = await getMedicine(item.medicine_id);
       if (med) {
+        const { formatQuantity } = await import('../utils/format.js');
         await ctx.editMessageText(
-          `✅ *${item.name}* — куплено!\n\nПополнить остаток в аптечке?`,
+          `✅ *${item.name}* — куплено!\n\nТекущий остаток: ${formatQuantity(med.quantity, med.quantity_unit)}\nПополнить?`,
           {
             parse_mode: 'Markdown',
             reply_markup: new InlineKeyboard()

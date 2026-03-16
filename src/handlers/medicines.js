@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getMedicine, updateMedicine, archiveMedicine, restoreMedicine, toggleFavorite, getArchivedMedicines, createMedicine } from '../db/queries/medicines.js';
 import { getMedkit, getUserMedkits } from '../db/queries/medkits.js';
 import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUntil, formatProgressBar } from '../utils/format.js';
+import { paginateItems, addPagination } from '../keyboards/pagination.js';
 import { logAction, logMedicineChange } from '../middleware/logging.js';
 import { getMedicineHistory } from '../db/queries/actionLogs.js';
 import { supabase } from '../db/supabase.js';
@@ -21,7 +22,16 @@ async function showMedicineCard(ctx, medicineId) {
   const thresholdDays = settings.thresholds?.expiry_days || 30;
 
   const statusEmoji = medicineStatusEmoji(med, settings.thresholds);
-  let text = `${statusEmoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
+  let statusLabel = '';
+  if (statusEmoji === '❌') {
+    statusLabel = ' — _просрочено_';
+  } else if (statusEmoji === '⚠️') {
+    const days = daysUntil(med.expiry_date);
+    statusLabel = ` — _истекает через ${days} дн._`;
+  } else if (statusEmoji === '📉') {
+    statusLabel = ' — _мало остатка_';
+  }
+  let text = `${statusEmoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}${statusLabel}\n`;
 
   if (med.category) text += `🏷 ${med.category}`;
   if (med.tags && med.tags.length > 0) {
@@ -40,7 +50,7 @@ async function showMedicineCard(ctx, medicineId) {
     const qty = formatQuantity(med.quantity, med.quantity_unit);
     text += `📏 Остаток: ${qty}\n`;
   } else {
-    text += `📏 Остаток: нет\n`;
+    text += `📏 Остаток: 0 ${med.quantity_unit || 'шт'}\n`;
   }
 
   if (med.notes) text += `📝 ${med.notes}\n`;
@@ -52,7 +62,7 @@ async function showMedicineCard(ctx, medicineId) {
   // Row 1: Primary actions
   keyboard.text('✏️ Изменить', `med:${med.id}:edit`);
   keyboard.text('➕ Пополнить', `med:${med.id}:restock`);
-  keyboard.text(med.is_favorite ? '⭐' : '☆', `med:${med.id}:fav`);
+  keyboard.text(med.is_favorite ? '⭐ Избр.' : '☆ Избр.', `med:${med.id}:fav`);
   keyboard.row();
   // Row 2: Secondary actions
   keyboard.text('📆 Курс приёма', `med:${med.id}:schedule`);
@@ -74,15 +84,15 @@ async function showMedicineCard(ctx, medicineId) {
 /**
  * Format a datetime as DD.MM.YYYY HH:MM
  */
-function formatDateTime(dateStr) {
+function formatDateTime(dateStr, timezone = 'Europe/Moscow') {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  const hours = String(d.getHours()).padStart(2, '0');
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  return `${day}.${month}.${year} ${hours}:${minutes}`;
+  const fmt = new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: timezone,
+  });
+  return fmt.format(d);
 }
 
 const FIELD_LABELS = {
@@ -326,13 +336,14 @@ export function registerMedicineHandlers(bot) {
 
     const history = await getMedicineHistory(medId);
 
+    const timezone = ctx.dbUser.timezone || 'Europe/Moscow';
     let text = `🕓 *История: ${med.name}*\n\n`;
 
     if (history.length === 0) {
       text += '_Нет записей об изменениях._\n';
     } else {
       for (const entry of history) {
-        const dateStr = formatDateTime(entry.changed_at);
+        const dateStr = formatDateTime(entry.changed_at, timezone);
         const username = entry.users?.username ? `@${entry.users.username}` : (entry.users?.first_name || 'Пользователь');
         text += `${dateStr} — ${username}\n`;
 
@@ -484,22 +495,25 @@ export function registerMedicineHandlers(bot) {
   });
 
   // View archived medicines
-  bot.callbackQuery(/^medkit:([0-9a-f-]+):archive$/, async (ctx) => {
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):archive(?::page:(\d+))?$/, async (ctx) => {
     await ctx.answerCallbackQuery();
-    const archived = await getArchivedMedicines(ctx.match[1]);
+    const medkitId = ctx.match[1];
+    const page = ctx.match[2] ? parseInt(ctx.match[2]) : 0;
+    const archived = await getArchivedMedicines(medkitId);
 
     if (archived.length === 0) {
       await ctx.editMessageText('📂 Архив пуст.\n\n_Архивированные лекарства появятся здесь._', {
         parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${ctx.match[1]}`),
+        reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}`),
       });
       return;
     }
 
-    let text = '📂 *Архив*\n\n';
+    const pageItems = paginateItems(archived, page);
+    let text = `📂 *Архив* (${archived.length})\n\n`;
     const keyboard = new InlineKeyboard();
 
-    for (const med of archived) {
+    for (const med of pageItems) {
       text += `📥 ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n`;
       keyboard
         .text(`♻️ ${med.name}`, `med:${med.id}:restore`)
@@ -507,7 +521,9 @@ export function registerMedicineHandlers(bot) {
         .row();
     }
 
-    keyboard.text('◀️ Назад', `medkit:${ctx.match[1]}`);
+    addPagination(keyboard, page, archived.length, `medkit:${medkitId}:archive`);
+    keyboard.row();
+    keyboard.text('◀️ Назад', `medkit:${medkitId}`);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 

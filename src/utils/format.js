@@ -84,8 +84,8 @@ export function formatExpiry(expiryDate, dateFormat, thresholdDays = 30) {
   const days = daysUntil(expiryDate);
   const formatted = formatDate(expiryDate, dateFormat);
 
-  if (days <= 0) return `${formatted} (ПРОСРОЧЕНО)`;
-  if (days <= thresholdDays) return `${formatted} (осталось ${days} дн.)`;
+  if (days <= 0) return `${formatted} ❌ просрочено`;
+  if (days <= thresholdDays) return `${formatted} (${days} дн.)`;
   return formatted;
 }
 
@@ -101,6 +101,30 @@ export function formatProgressBar(current, total, width = 10) {
   const ratio = Math.max(0, Math.min(1, current / total));
   const filled = Math.round(ratio * width);
   return '█'.repeat(filled) + '░'.repeat(width - filled);
+}
+
+/**
+ * Proper Russian declension for "день" (1 день, 2 дня, 5 дней)
+ */
+export function getDaysWord(n) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs >= 11 && abs <= 19) return 'дней';
+  if (last === 1) return 'день';
+  if (last >= 2 && last <= 4) return 'дня';
+  return 'дней';
+}
+
+/**
+ * Proper Russian declension for "лекарство" (1 лекарство, 2 лекарства, 5 лекарств)
+ */
+export function getMedWord(n) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs >= 11 && abs <= 19) return 'лекарств';
+  if (last === 1) return 'лекарство';
+  if (last >= 2 && last <= 4) return 'лекарства';
+  return 'лекарств';
 }
 
 /**

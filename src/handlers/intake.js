@@ -6,12 +6,12 @@ import { supabase } from '../db/supabase.js';
 import { formatQuantity, formatProgressBar } from '../utils/format.js';
 
 /**
- * Format time string from ISO or HH:MM
+ * Format time string from ISO in user's timezone
  */
-function formatTime(plannedAt) {
+function formatTime(plannedAt, timezone = 'Europe/Moscow') {
   const d = new Date(plannedAt);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
+  const hh = String(d.toLocaleString('en-US', { hour: '2-digit', hour12: false, timeZone: timezone })).padStart(2, '0');
+  const mm = String(d.toLocaleString('en-US', { minute: '2-digit', timeZone: timezone })).padStart(2, '0');
   return `${hh}:${mm}`;
 }
 
@@ -35,15 +35,18 @@ async function buildTodayView(userId, timezone) {
 
   if (logs.length === 0) {
     return {
-      text: '💊 *Приём на сегодня*\n\nНет запланированных приёмов.\n\nДобавьте курс приёма через карточку лекарства (📆 Приём).',
-      keyboard: new InlineKeyboard().text('◀️ Назад', 'main_menu'),
+      text: '💊 *Приём на сегодня*\n\nНет запланированных приёмов.\n\n💡 _Добавьте курс приёма через карточку лекарства → 📆 Курс приёма_',
+      keyboard: new InlineKeyboard()
+        .text('📦 Аптечки', 'medkits')
+        .row()
+        .text('◀️ Назад', 'main_menu'),
     };
   }
 
   // Group by time
   const byTime = {};
   for (const log of logs) {
-    const time = formatTime(log.planned_at);
+    const time = formatTime(log.planned_at, timezone);
     if (!byTime[time]) byTime[time] = [];
     byTime[time].push(log);
   }
@@ -61,6 +64,7 @@ async function buildTodayView(userId, timezone) {
       const emoji = statusEmoji(log.status);
 
       text += `  ${emoji} ${name} — ${dose} ${unit}`;
+      if (log.status === 'snoozed' && log.snooze_count) text += ` (⏰×${log.snooze_count})`;
       if (log.note) text += ` 📝`;
       text += '\n';
 
@@ -87,6 +91,7 @@ async function buildTodayView(userId, timezone) {
   if (skipped > 0) text += `, ${skipped} пропущено`;
   if (pending > 0) text += `, ${pending} ожидает`;
 
+  keyboard.text('🔄 Обновить', 'intake_today');
   keyboard.text('◀️ Назад', 'main_menu');
 
   return { text, keyboard };

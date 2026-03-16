@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { createSchedule, getMedicineSchedules, getSchedule, updateScheduleStatus, deleteSchedule } from '../db/queries/schedules.js';
 import { getMedicine } from '../db/queries/medicines.js';
 import { supabase } from '../db/supabase.js';
-import { formatQuantity } from '../utils/format.js';
+import { formatQuantity, getDaysWord } from '../utils/format.js';
 
 /**
  * Day of week labels (Russian, short)
@@ -28,27 +28,6 @@ const FREQ_LABELS = {
   every_other_day: 'Через день',
   weekly: 'По дням недели',
 };
-
-/**
- * Duration labels
- */
-const DURATION_LABELS = {
-  indefinite: '♾ Бессрочно',
-  days: 'дней',
-  until_date: 'до',
-};
-
-/**
- * Proper Russian declension for "день"
- */
-function getDaysWord(n) {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs >= 11 && abs <= 19) return 'дней';
-  if (last === 1) return 'день';
-  if (last >= 2 && last <= 4) return 'дня';
-  return 'дней';
-}
 
 /**
  * Format schedule info for display

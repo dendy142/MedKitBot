@@ -1,19 +1,7 @@
 import { InlineKeyboard, InputFile } from 'grammy';
 import { getUserMedkits } from '../db/queries/medkits.js';
 import { getMedkitMedicines } from '../db/queries/medicines.js';
-import { formatDate } from '../utils/format.js';
-
-/**
- * Proper Russian declension for "лекарство"
- */
-function getMedWord(n) {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs >= 11 && abs <= 19) return 'лекарств';
-  if (last === 1) return 'лекарство';
-  if (last >= 2 && last <= 4) return 'лекарства';
-  return 'лекарств';
-}
+import { formatDate, getMedWord } from '../utils/format.js';
 
 /**
  * Escape a CSV field (semicolon-separated): wrap in quotes if needed

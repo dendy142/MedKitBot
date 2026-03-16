@@ -107,3 +107,25 @@ export async function countMedkitMedicines(medkitId) {
     .eq('is_archived', false);
   return count || 0;
 }
+
+/**
+ * Count medicines for multiple medkits at once (excluding archived)
+ * Returns a map of medkitId → count
+ */
+export async function countMedkitMedicinesBatch(medkitIds) {
+  if (!medkitIds.length) return {};
+  const { data } = await supabase
+    .from('medicines')
+    .select('medkit_id')
+    .in('medkit_id', medkitIds)
+    .eq('is_archived', false);
+
+  const counts = {};
+  for (const id of medkitIds) counts[id] = 0;
+  if (data) {
+    for (const row of data) {
+      counts[row.medkit_id] = (counts[row.medkit_id] || 0) + 1;
+    }
+  }
+  return counts;
+}

@@ -20,24 +20,27 @@ async function showMedicineCard(ctx, medicineId) {
   const dateFormat = settings.display?.date_format || 'DD.MM.YYYY';
   const thresholdDays = settings.thresholds?.expiry_days || 30;
 
-  let text = `💊 *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
+  const statusEmoji = medicineStatusEmoji(med, settings.thresholds);
+  let text = `${statusEmoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
 
   if (med.category) text += `🏷 ${med.category}`;
   if (med.tags && med.tags.length > 0) {
-    text += (med.category ? ' | ' : '🏷 ') + med.tags.map(t => `#${t}`).join(' ');
+    text += (med.category ? ' · ' : '🔖 ') + med.tags.map(t => `#${t}`).join(' ');
   }
   if (med.category || (med.tags && med.tags.length > 0)) text += '\n';
 
-  text += `📅 Срок: ${formatExpiry(med.expiry_date, dateFormat, thresholdDays)}\n`;
+  text += `📅 Срок: ${med.expiry_date ? formatExpiry(med.expiry_date, dateFormat, thresholdDays) : 'не указан'}\n`;
 
   // Quantity with visual progress bar
   if (med.initial_quantity > 0) {
     const percent = Math.round((med.quantity / med.initial_quantity) * 100);
     const bar = formatProgressBar(med.quantity, med.initial_quantity);
     text += `📏 ${bar} ${med.quantity}/${med.initial_quantity} ${med.quantity_unit} (${percent}%)\n`;
-  } else {
+  } else if (med.quantity > 0) {
     const qty = formatQuantity(med.quantity, med.quantity_unit);
     text += `📏 Остаток: ${qty}\n`;
+  } else {
+    text += `📏 Остаток: нет\n`;
   }
 
   if (med.notes) text += `📝 ${med.notes}\n`;
@@ -56,7 +59,7 @@ async function showMedicineCard(ctx, medicineId) {
   keyboard.text('🛒 В покупки', `med:${med.id}:shop`);
   keyboard.row();
   // Row 3: More actions submenu
-  keyboard.text('⋯ Ещё', `med:${med.id}:more`);
+  keyboard.text('📋 Ещё', `med:${med.id}:more`);
   keyboard.row();
   // Row 4: Navigation
   keyboard.text('◀️ Назад', `medkit:${med.medkit_id}`);
@@ -122,7 +125,7 @@ export function registerMedicineHandlers(bot) {
       .text('◀️ Назад', `med:${medId}`);
 
     await ctx.editMessageText(
-      `⋯ *${med.name}* — дополнительно:`,
+      `📋 *${med.name}* — дополнительно:`,
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
@@ -173,10 +176,35 @@ export function registerMedicineHandlers(bot) {
     const med = await getMedicine(ctx.match[1]);
     if (!med) return;
     await ctx.editMessageText(
-      `➕ *Пополнение: ${med.name}*\n\nТекущий остаток: ${formatQuantity(med.quantity, med.quantity_unit)}\n\nВведите количество для добавления:`,
+      `➕ *Пополнение: ${med.name}*\n\nТекущий остаток: ${formatQuantity(med.quantity, med.quantity_unit)}\n\nВведите количество или выберите:`,
       {
         parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard().text('❌ Отмена', `med:${ctx.match[1]}`),
+        reply_markup: new InlineKeyboard()
+          .text('+1', `med:${ctx.match[1]}:restock:1`)
+          .text('+5', `med:${ctx.match[1]}:restock:5`)
+          .text('+10', `med:${ctx.match[1]}:restock:10`)
+          .text('+30', `med:${ctx.match[1]}:restock:30`)
+          .row()
+          .text('❌ Отмена', `med:${ctx.match[1]}`),
+      }
+    );
+  });
+
+  // Quick restock buttons
+  bot.callbackQuery(/^med:([0-9a-f-]+):restock:(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const amount = parseInt(ctx.match[2]);
+    const med = await getMedicine(medId);
+    if (!med) return;
+
+    const newQty = med.quantity + amount;
+    await updateMedicine(medId, { quantity: newQty });
+    await logMedicineChange(medId, ctx.dbUser.id, 'quantity', med.quantity, newQty);
+    await ctx.editMessageText(
+      `✅ Остаток пополнен: ${formatQuantity(newQty, med.quantity_unit)}`,
+      {
+        reply_markup: new InlineKeyboard().text('◀️ К лекарству', `med:${medId}`),
       }
     );
   });

@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import { getUserMedkits, getMedkit, createMedkit, renameMedkit, deleteMedkit, countMedkitMedicines } from '../db/queries/medkits.js';
+import { getUserMedkits, getMedkit, createMedkit, renameMedkit, deleteMedkit, countMedkitMedicinesBatch } from '../db/queries/medkits.js';
 import { getMedkitMedicines } from '../db/queries/medicines.js';
 import { addPagination, paginateItems } from '../keyboards/pagination.js';
 import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil } from '../utils/format.js';
@@ -33,8 +33,9 @@ async function showMedkitList(ctx, page = 0) {
 
   const keyboard = new InlineKeyboard();
 
+  const counts = await countMedkitMedicinesBatch(pageItems.map(mk => mk.id));
   for (const mk of pageItems) {
-    const count = await countMedkitMedicines(mk.id);
+    const count = counts[mk.id] || 0;
     const shared = mk.isShared ? ' 👥' : '';
     keyboard.text(`${mk.name} (${count})${shared}`, `medkit:${mk.id}`).row();
   }
@@ -74,7 +75,7 @@ function buildMedkitKeyboard(medkitId, pageItems, page, totalItems) {
   keyboard.text('🔀 Сорт.', `medkit:${medkitId}:sort`);
   keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
   keyboard.row();
-  keyboard.text('⋯ Управление', `medkit:${medkitId}:manage`);
+  keyboard.text('⚙️ Управление', `medkit:${medkitId}:manage`);
   keyboard.row();
   keyboard.text('◀️ Назад', 'medkits');
 
@@ -128,12 +129,32 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
 
   text += formatMedicineList(pageItems, settings);
 
-  if (medicines.length === 0) {
+  if (medicines.length === 0 && !filterField) {
     text += '_Аптечка пуста. Добавьте первое лекарство!_\n';
+  } else if (medicines.length === 0 && filterField) {
+    text += '_Нет лекарств по этому фильтру._\n';
   }
 
   const keyboard = buildMedkitKeyboard(medkitId, pageItems, page, medicines.length);
-  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+
+  // Add filter reset button if filter is active
+  if (filterField) {
+    // Insert before the last "Назад" row
+    const resetKb = new InlineKeyboard();
+    // Copy existing keyboard but add reset before back
+    for (const row of keyboard.inline_keyboard.slice(0, -1)) {
+      for (const btn of row) {
+        resetKb.text(btn.text, btn.callback_data);
+      }
+      resetKb.row();
+    }
+    resetKb.text('❌ Сбросить фильтр', `medkit:${medkitId}`);
+    resetKb.row();
+    resetKb.text('◀️ Назад', 'medkits');
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: resetKb });
+  } else {
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  }
 }
 
 /**

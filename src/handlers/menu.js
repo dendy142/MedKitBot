@@ -2,20 +2,8 @@ import { mainMenuKeyboard } from '../keyboards/mainMenu.js';
 import { getUserMedkits } from '../db/queries/medkits.js';
 import { countShoppingItems } from '../db/queries/shoppingList.js';
 import { getTodayIntakeLogs } from '../db/queries/intakeLogs.js';
-import { formatProgressBar, formatQuantity, daysUntil } from '../utils/format.js';
+import { formatProgressBar, formatQuantity, daysUntil, getDaysWord } from '../utils/format.js';
 import { supabase } from '../db/supabase.js';
-
-/**
- * Proper Russian declension for "день"
- */
-function getDaysWord(n) {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs >= 11 && abs <= 19) return 'дней';
-  if (last === 1) return 'день';
-  if (last >= 2 && last <= 4) return 'дня';
-  return 'дней';
-}
 
 /**
  * Build dashboard text for main menu
@@ -119,7 +107,14 @@ async function buildDashboard(userId, settings) {
     text += `\n✨ Всё в порядке!`;
   }
 
-  text += `\n💡 _Напишите название лекарства для быстрого поиска_`;
+  // Dynamic tips based on user state
+  if (medkitCount === 0) {
+    text += `\n💡 _Нажмите «Аптечки» чтобы создать первую_`;
+  } else if (totalIntakes > 0 && doneIntakes < totalIntakes) {
+    text += `\n💡 _Нажмите «Приём» чтобы отметить принятые_`;
+  } else {
+    text += `\n💡 _Напишите название лекарства для быстрого поиска_`;
+  }
 
   return text;
 }

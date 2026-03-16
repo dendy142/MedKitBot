@@ -167,7 +167,7 @@ async function askUsername(ctx, medkitId, role) {
     .text('❌ Отмена', `medkit:${medkitId}:share`);
 
   await ctx.editMessageText(
-    `📝 *Приглашение по username*\n\nРоль: ${ROLE_LABELS[role]}\n\nВведите @username пользователя (без @):`,
+    `📝 *Приглашение по username*\n\nРоль: ${ROLE_LABELS[role]}\n\nВведите username пользователя:`,
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }

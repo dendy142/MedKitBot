@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { CATEGORIES, DOSAGE_UNITS, QUANTITY_UNITS, MAX_PHOTOS } from '../config.js';
 import { createMedicine } from '../db/queries/medicines.js';
 import { getMedkit } from '../db/queries/medkits.js';
-import { formatDate, formatQuantity } from '../utils/format.js';
+import { formatDate, formatQuantity, formatProgressBar } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
 import { supabase } from '../db/supabase.js';
 import { ONBOARDING_COMPLETE_TEXT } from './onboarding.js';
@@ -88,8 +88,7 @@ function buildStageHeader(state) {
   if (stage === 'confirm') return '📋 *Проверьте данные:*';
   const idx = STAGES.indexOf(stage);
   const total = STAGES.length;
-  const filled = Math.round(((idx + 1) / total) * 14);
-  const bar = '▓'.repeat(filled) + '░'.repeat(14 - filled);
+  const bar = formatProgressBar(idx + 1, total, 14);
   const label = STAGE_LABELS[stage] || stage;
   return `💊 *Добавление в «${state.medkitName}»*\n${bar} ${label}`;
 }
@@ -186,41 +185,68 @@ export async function handleAddMedicineText(ctx) {
 
   if (step === 'name') {
     state.data.name = text;
-    state.step = 'dosage_unit';
-    await setState(ctx.dbUser.id, state);
-    await sendDosageUnitPicker(ctx, state);
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    } else {
+      state.step = 'dosage_unit';
+      await setState(ctx.dbUser.id, state);
+      await sendDosageUnitPicker(ctx, state);
+    }
     return true;
   }
 
   if (step === 'dosage_value') {
     state.data.dosage = `${text} ${state.dosageUnit}`;
-    state.step = 'category';
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+    } else {
+      state.step = 'category';
+    }
     await setState(ctx.dbUser.id, state);
-    await sendCategoryPicker(ctx, state);
+    state.step === 'confirm' ? await sendConfirmation(ctx, state) : await sendCategoryPicker(ctx, state);
     return true;
   }
 
   if (step === 'dosage_custom') {
     state.data.dosage = text;
-    state.step = 'category';
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+    } else {
+      state.step = 'category';
+    }
     await setState(ctx.dbUser.id, state);
-    await sendCategoryPicker(ctx, state);
+    state.step === 'confirm' ? await sendConfirmation(ctx, state) : await sendCategoryPicker(ctx, state);
     return true;
   }
 
   if (step === 'category_custom') {
     state.data.category = text;
-    state.step = 'tags';
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+    } else {
+      state.step = 'tags';
+    }
     await setState(ctx.dbUser.id, state);
-    await sendTagsPrompt(ctx, state);
+    state.step === 'confirm' ? await sendConfirmation(ctx, state) : await sendTagsPrompt(ctx, state);
     return true;
   }
 
   if (step === 'tags') {
     state.data.tags = text.split(',').map(t => t.trim()).filter(t => t.length > 0);
-    state.step = 'expiry_year';
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+    } else {
+      state.step = 'expiry_year';
+    }
     await setState(ctx.dbUser.id, state);
-    await sendExpiryYearPicker(ctx, state);
+    state.step === 'confirm' ? await sendConfirmation(ctx, state) : await sendExpiryYearPicker(ctx, state);
     return true;
   }
 
@@ -228,9 +254,16 @@ export async function handleAddMedicineText(ctx) {
     const num = parseFloat(text);
     if (!isNaN(num) && num >= 0) {
       state.data.quantity = num;
-      state.step = 'quantity_unit';
-      await setState(ctx.dbUser.id, state);
-      await sendQuantityUnitPicker(ctx, state);
+      if (state.editingFromConfirm) {
+        state.editingFromConfirm = false;
+        state.step = 'confirm';
+        await setState(ctx.dbUser.id, state);
+        await sendConfirmation(ctx, state);
+      } else {
+        state.step = 'quantity_unit';
+        await setState(ctx.dbUser.id, state);
+        await sendQuantityUnitPicker(ctx, state);
+      }
     } else {
       const header = buildStageHeader(state);
       await editBotMsg(ctx, state,
@@ -246,6 +279,8 @@ export async function handleAddMedicineText(ctx) {
   if (step === 'notes') {
     state.data.notes = text;
     state.step = 'confirm';
+    // editingFromConfirm doesn't matter here, we always go to confirm
+    state.editingFromConfirm = false;
     await setState(ctx.dbUser.id, state);
     await sendConfirmation(ctx, state);
     return true;
@@ -350,9 +385,16 @@ export async function handleAddMedicineCallback(ctx, action) {
   if (action.startsWith('addmed:cat:')) {
     state.data.category = action.replace('addmed:cat:', '');
     await ctx.answerCallbackQuery();
-    state.step = 'tags';
-    await setState(ctx.dbUser.id, state);
-    await sendTagsPrompt(ctx, state);
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    } else {
+      state.step = 'tags';
+      await setState(ctx.dbUser.id, state);
+      await sendTagsPrompt(ctx, state);
+    }
     return true;
   }
 
@@ -403,9 +445,16 @@ export async function handleAddMedicineCallback(ctx, action) {
     const m = String(state.expiryMonth).padStart(2, '0');
     const d = String(day).padStart(2, '0');
     state.data.expiryDate = `${y}-${m}-${d}`;
-    state.step = 'quantity';
-    await setState(ctx.dbUser.id, state);
-    await sendQuantityPrompt(ctx, state);
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    } else {
+      state.step = 'quantity';
+      await setState(ctx.dbUser.id, state);
+      await sendQuantityPrompt(ctx, state);
+    }
     return true;
   }
 
@@ -415,9 +464,16 @@ export async function handleAddMedicineCallback(ctx, action) {
     const m = String(state.expiryMonth).padStart(2, '0');
     const lastDay = new Date(y, state.expiryMonth, 0).getDate();
     state.data.expiryDate = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
-    state.step = 'quantity';
-    await setState(ctx.dbUser.id, state);
-    await sendQuantityPrompt(ctx, state);
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    } else {
+      state.step = 'quantity';
+      await setState(ctx.dbUser.id, state);
+      await sendQuantityPrompt(ctx, state);
+    }
     return true;
   }
 
@@ -425,18 +481,32 @@ export async function handleAddMedicineCallback(ctx, action) {
   if (action.startsWith('addmed:qunit:')) {
     state.data.quantityUnit = action.replace('addmed:qunit:', '');
     await ctx.answerCallbackQuery();
-    state.step = 'photos';
-    await setState(ctx.dbUser.id, state);
-    await sendPhotosPrompt(ctx, state);
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    } else {
+      state.step = 'photos';
+      await setState(ctx.dbUser.id, state);
+      await sendPhotosPrompt(ctx, state);
+    }
     return true;
   }
 
   // --- Photos ---
   if (action === 'addmed:photos_done') {
     await ctx.answerCallbackQuery();
-    state.step = 'notes';
-    await setState(ctx.dbUser.id, state);
-    await sendNotesPrompt(ctx, state);
+    if (state.editingFromConfirm) {
+      state.editingFromConfirm = false;
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    } else {
+      state.step = 'notes';
+      await setState(ctx.dbUser.id, state);
+      await sendNotesPrompt(ctx, state);
+    }
     return true;
   }
 
@@ -484,6 +554,52 @@ export async function handleAddMedicineCallback(ctx, action) {
     return true;
   }
 
+  // --- Edit field from confirmation screen ---
+  if (action.startsWith('addmed:editfield:')) {
+    const field = action.replace('addmed:editfield:', '');
+    await ctx.answerCallbackQuery();
+    state.editingFromConfirm = true;
+
+    if (field === 'name') {
+      state.step = 'name';
+      await setState(ctx.dbUser.id, state);
+      const header = buildStageHeader(state);
+      await ctx.editMessageText(
+        `${header}\n\nТекущее: *${state.data.name}*\n\nВведите новое *название*:`,
+        { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().text('⏭ Оставить', 'addmed:backtoconfirm').row().text('❌ Отмена', 'addmed:cancel') }
+      );
+    } else if (field === 'dosage') {
+      state.step = 'dosage_unit';
+      await setState(ctx.dbUser.id, state);
+      await sendDosageUnitPicker(ctx, state);
+    } else if (field === 'category') {
+      state.step = 'category';
+      await setState(ctx.dbUser.id, state);
+      await sendCategoryPicker(ctx, state);
+    } else if (field === 'expiry') {
+      state.step = 'expiry_year';
+      await setState(ctx.dbUser.id, state);
+      await sendExpiryYearPicker(ctx, state);
+    } else if (field === 'quantity') {
+      state.step = 'quantity';
+      await setState(ctx.dbUser.id, state);
+      await sendQuantityPrompt(ctx, state);
+    } else if (field === 'photos') {
+      state.step = 'photos';
+      await setState(ctx.dbUser.id, state);
+      await sendPhotosPrompt(ctx, state);
+    }
+    return true;
+  }
+
+  // --- Back to confirmation from field edit ---
+  if (action === 'addmed:backtoconfirm') {
+    state.step = 'confirm';
+    await setState(ctx.dbUser.id, state);
+    await sendConfirmation(ctx, state);
+    return true;
+  }
+
   return false;
 }
 
@@ -492,6 +608,15 @@ export async function handleAddMedicineCallback(ctx, action) {
 // ============================================================
 
 async function advanceStep(ctx, state) {
+  // If editing a single field from confirmation, go back to confirm
+  if (state.editingFromConfirm) {
+    state.editingFromConfirm = false;
+    state.step = 'confirm';
+    await setState(ctx.dbUser.id, state);
+    await sendConfirmation(ctx, state);
+    return true;
+  }
+
   const { step } = state;
 
   if (step === 'dosage_unit' || step === 'dosage_value' || step === 'dosage_custom') {
@@ -657,18 +782,28 @@ async function sendConfirmation(ctx, state) {
   const d = state.data;
   let s = `📋 *Проверьте данные:*\n\n`;
   s += `💊 *Название:* ${d.name}\n`;
-  s += d.dosage ? `💉 *Дозировка:* ${d.dosage}\n` : `💉 *Дозировка:* _не указана_\n`;
-  s += d.category ? `🏷 *Категория:* ${d.category}\n` : `🏷 *Категория:* _не указана_\n`;
-  s += d.tags.length > 0 ? `🏷 *Теги:* ${d.tags.join(', ')}\n` : `🏷 *Теги:* _не указаны_\n`;
-  s += d.expiryDate ? `📅 *Срок годности:* ${formatDate(d.expiryDate)}\n` : `📅 *Срок годности:* _не указан_\n`;
-  s += `📏 *Количество:* ${d.quantity > 0 ? formatQuantity(d.quantity, d.quantityUnit) : '_не указано_'}\n`;
+  s += d.dosage ? `💉 *Дозировка:* ${d.dosage}\n` : `💉 *Дозировка:* —\n`;
+  s += d.category ? `🏷 *Категория:* ${d.category}\n` : `🏷 *Категория:* —\n`;
+  s += d.tags.length > 0 ? `🔖 *Теги:* ${d.tags.join(', ')}\n` : '';
+  s += d.expiryDate ? `📅 *Срок:* ${formatDate(d.expiryDate)}\n` : `📅 *Срок:* —\n`;
+  s += `📏 *Кол-во:* ${d.quantity > 0 ? formatQuantity(d.quantity, d.quantityUnit) : '—'}\n`;
   if (d.photoFileIds.length > 0) s += `📷 *Фото:* ${d.photoFileIds.length} шт.\n`;
-  s += d.notes ? `📝 *Заметки:* ${d.notes}\n` : `📝 *Заметки:* _нет_\n`;
+  if (d.notes) s += `📝 *Заметки:* ${d.notes}\n`;
+
+  s += '\n_Нажмите на поле, чтобы изменить:_';
 
   const kb = new InlineKeyboard()
     .text('✅ Сохранить', 'addmed:confirm')
-    .text('✏️ Изменить', 'addmed:reject')
     .row()
-    .text('❌ Отмена', 'addmed:reject');
+    .text('💊 Название', 'addmed:editfield:name')
+    .text('💉 Дозировка', 'addmed:editfield:dosage')
+    .row()
+    .text('🏷 Категория', 'addmed:editfield:category')
+    .text('📅 Срок', 'addmed:editfield:expiry')
+    .row()
+    .text('📏 Кол-во', 'addmed:editfield:quantity')
+    .text('📷 Фото', 'addmed:editfield:photos')
+    .row()
+    .text('❌ Отмена', 'addmed:cancel');
   await editBotMsg(ctx, state, s, kb);
 }

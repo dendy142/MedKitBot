@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getIntakeLogsForPeriod } from '../db/queries/intakeLogs.js';
 import { getUserActiveSchedules } from '../db/queries/schedules.js';
 import { DEFAULT_TIMEZONE } from '../config.js';
-import { formatProgressBar } from '../utils/format.js';
+import { formatProgressBar, getDaysWord } from '../utils/format.js';
 
 const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
@@ -223,22 +223,21 @@ async function showStatsForPeriod(ctx, period) {
   const totalBar = formatProgressBar(totalTaken, totalPlanned);
   text += `\n\n📈 Общее: ${totalBar} ${totalTaken}/${totalPlanned} (${totalPct}%)`;
 
+  // Motivational message
+  if (totalPct === 100) {
+    text += '\n\n🏆 *Отлично!* Все приёмы выполнены!';
+  } else if (totalPct >= 80) {
+    text += '\n\n👍 *Хорошо!* Продолжайте в том же духе!';
+  } else if (totalPct >= 50) {
+    text += '\n\n💪 Неплохо, но можно лучше!';
+  } else if (totalPlanned > 0) {
+    text += '\n\n⚡ Старайтесь не пропускать приёмы!';
+  }
+
   const keyboard = new InlineKeyboard()
     .text('◀️ Назад', 'stats');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
-}
-
-/**
- * Proper Russian declension for "день"
- */
-function getDaysWord(n) {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs >= 11 && abs <= 19) return 'дней';
-  if (last === 1) return 'день';
-  if (last >= 2 && last <= 4) return 'дня';
-  return 'дней';
 }
 
 /**

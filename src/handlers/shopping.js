@@ -81,12 +81,13 @@ export function registerShoppingHandlers(bot) {
       return;
     }
     await ctx.answerCallbackQuery('Список отправлен ниже');
-    let text = '🛒 Список покупок:\n\n';
-    for (const item of items) {
-      text += `• ${item.name}\n`;
+    let text = '🛒 *Список покупок:*\n\n';
+    for (let i = 0; i < items.length; i++) {
+      const medkit = items[i].medkits?.name ? ` _(${items[i].medkits.name})_` : '';
+      text += `☐ ${items[i].name}${medkit}\n`;
     }
     // Send as new message (can be forwarded)
-    await ctx.reply(text);
+    await ctx.reply(text, { parse_mode: 'Markdown' });
   });
 
   // Delete individual item

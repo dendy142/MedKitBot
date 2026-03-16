@@ -53,7 +53,7 @@ export async function handleSearch(ctx) {
   for (const [medkitName, meds] of Object.entries(grouped)) {
     text += `📦 *${medkitName}*\n`;
     for (const med of meds) {
-      const emoji = medicineStatusEmoji(med);
+      const emoji = medicineStatusEmoji(med, ctx.dbUser.settings?.thresholds);
       const qty = formatQuantity(med.quantity, med.quantity_unit);
       text += `${emoji} ${med.name}${med.dosage ? ' ' + med.dosage : ''} — ${qty}\n`;
       keyboard.text(`${med.name}`, `med:${med.id}`).row();

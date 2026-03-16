@@ -2,20 +2,8 @@ import { InlineKeyboard } from 'grammy';
 import { supabase } from '../db/supabase.js';
 import { getUserMedkits } from '../db/queries/medkits.js';
 import { createMedicine } from '../db/queries/medicines.js';
-import { parseDate } from '../utils/format.js';
+import { parseDate, getMedWord } from '../utils/format.js';
 import { BOT_TOKEN } from '../config.js';
-
-/**
- * Proper Russian declension for "лекарство"
- */
-function getMedWord(n) {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs >= 11 && abs <= 19) return 'лекарств';
-  if (last === 1) return 'лекарство';
-  if (last >= 2 && last <= 4) return 'лекарства';
-  return 'лекарств';
-}
 
 async function getState(userId) {
   const { data } = await supabase

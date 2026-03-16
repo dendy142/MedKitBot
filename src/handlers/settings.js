@@ -135,7 +135,7 @@ export function registerSettingsHandlers(bot) {
 
   // --- Thresholds ---
   function buildThresholdView(t) {
-    const check = (val, current) => val === current ? ' ✓' : '';
+    const check = (val, current) => val === current ? ' ✅' : '';
     const text = `📐 *Пороги предупреждений*\n\n` +
       `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
       `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
@@ -263,7 +263,7 @@ export function registerSettingsHandlers(bot) {
 
   // --- Display ---
   function buildDisplayView(d) {
-    const check = (val, current) => val === current ? ' ✓' : '';
+    const check = (val, current) => val === current ? ' ✅' : '';
     const text = `📋 *Отображение*\n\n` +
       `🔀 Сортировка: *${SORT_LABELS[d.default_sort] || d.default_sort}*\n` +
       `📅 Формат дат: *${d.date_format}*`;

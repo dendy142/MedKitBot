@@ -46,14 +46,30 @@ async function buildDashboard(userId, settings) {
   const totalIntakes = intakeLogs.length;
   const doneIntakes = intakeLogs.filter(l => l.status === 'taken').length;
 
-  let text = `👋 *Главное меню*\n\n`;
-  text += `📦 Аптечек: ${medkitCount}\n`;
-  if (totalIntakes > 0) {
-    text += `💊 Приём: ${doneIntakes}/${totalIntakes} выполнено\n`;
+  let text = `🏠 *Главное меню*\n\n`;
+
+  if (medkitCount === 0) {
+    text += `📦 У вас пока нет аптечек — создайте первую!\n`;
+  } else {
+    text += `📦 Аптечек: ${medkitCount}\n`;
   }
+
+  if (totalIntakes > 0) {
+    const pending = totalIntakes - doneIntakes;
+    if (pending > 0) {
+      text += `💊 Приём: ${doneIntakes}/${totalIntakes} выполнено, *${pending} ожидает*\n`;
+    } else {
+      text += `💊 Приём: всё выполнено ✅ (${totalIntakes})\n`;
+    }
+  }
+
   if (expiringCount > 0) text += `⚠️ Истекает скоро: ${expiringCount}\n`;
   if (lowStockCount > 0) text += `📉 Заканчивается: ${lowStockCount}\n`;
   if (shopCount > 0) text += `🛒 В списке покупок: ${shopCount}\n`;
+
+  if (medkitCount > 0 && expiringCount === 0 && lowStockCount === 0 && totalIntakes === 0 && shopCount === 0) {
+    text += `\n✨ Всё в порядке!`;
+  }
 
   return text;
 }

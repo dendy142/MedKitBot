@@ -5,6 +5,7 @@ import { getMedkit } from '../db/queries/medkits.js';
 import { formatDate, formatQuantity } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
 import { supabase } from '../db/supabase.js';
+import { ONBOARDING_COMPLETE_TEXT } from './onboarding.js';
 
 async function getState(userId) {
   const { data } = await supabase
@@ -52,6 +53,26 @@ async function deleteUserMsg(ctx) {
   try {
     await ctx.deleteMessage();
   } catch { /* ignore — might not have permission */ }
+}
+
+const ONBOARDING_NAV_KEYBOARD = new InlineKeyboard()
+  .text('📦 Мои аптечки', 'medkits')
+  .text('⚙️ Настройки', 'settings')
+  .row()
+  .text('📖 Помощь', 'help')
+  .text('🏠 Главное меню', 'main_menu');
+
+async function showCancelResult(ctx, fromOnboarding, medkitId) {
+  if (fromOnboarding) {
+    await ctx.editMessageText(
+      '⏭ Добавление пропущено. Вы сможете добавить лекарства позже.',
+      { parse_mode: 'Markdown', reply_markup: ONBOARDING_NAV_KEYBOARD }
+    );
+  } else {
+    await ctx.editMessageText('❌ Добавление отменено.', {
+      reply_markup: new InlineKeyboard().text('◀️ К аптечке', `medkit:${medkitId}`),
+    });
+  }
 }
 
 // ============================================================
@@ -230,24 +251,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     const medkitId = state.medkitId;
     await clearState(ctx.dbUser.id);
     await ctx.answerCallbackQuery('Отменено');
-    if (fromOnboarding) {
-      await ctx.editMessageText(
-        '⏭ Добавление пропущено. Вы сможете добавить лекарства позже.\n\nВот что умеет бот:',
-        {
-          parse_mode: 'Markdown',
-          reply_markup: new InlineKeyboard()
-            .text('📦 Мои аптечки', 'medkits')
-            .text('⚙️ Настройки', 'settings')
-            .row()
-            .text('📖 Помощь', 'help')
-            .text('🏠 Главное меню', 'main_menu'),
-        }
-      );
-    } else {
-      await ctx.editMessageText('❌ Добавление отменено.', {
-        reply_markup: new InlineKeyboard().text('◀️ К аптечке', `medkit:${medkitId}`),
-      });
-    }
+    await showCancelResult(ctx, fromOnboarding, medkitId);
     return true;
   }
 
@@ -438,22 +442,8 @@ export async function handleAddMedicineCallback(ctx, action) {
 
     if (fromOnboarding) {
       await ctx.editMessageText(
-        `✅ Лекарство *«${state.data.name}»* добавлено!\n\n🎉 *Всё готово! Вот что вы можете делать:*\n\n` +
-        `📦 *Аптечки* — создавайте несколько аптечек и переключайтесь между ними\n\n` +
-        `💊 *Лекарства* — добавляйте с дозировкой, сроком годности, категорией, фото и заметками\n\n` +
-        `📆 *Приём* — настройте расписание, и бот будет напоминать вовремя\n\n` +
-        `👥 *Общий доступ* — поделитесь аптечкой с семьёй по ссылке\n\n` +
-        `🔍 *Поиск* — просто напишите название лекарства в чат\n\n` +
-        `⚙️ *Настройки* — часовой пояс, уведомления, дайджест`,
-        {
-          parse_mode: 'Markdown',
-          reply_markup: new InlineKeyboard()
-            .text('📦 Мои аптечки', 'medkits')
-            .text('⚙️ Настройки', 'settings')
-            .row()
-            .text('📖 Помощь', 'help')
-            .text('🏠 Главное меню', 'main_menu'),
-        }
+        `✅ Лекарство *«${state.data.name}»* добавлено!\n\n${ONBOARDING_COMPLETE_TEXT}`,
+        { parse_mode: 'Markdown', reply_markup: ONBOARDING_NAV_KEYBOARD }
       );
     } else {
       await ctx.editMessageText(
@@ -476,23 +466,7 @@ export async function handleAddMedicineCallback(ctx, action) {
     const medkitId = state.medkitId;
     await clearState(ctx.dbUser.id);
     await ctx.answerCallbackQuery('Отменено');
-    if (fromOnboarding) {
-      await ctx.editMessageText(
-        '⏭ Добавление пропущено. Вы сможете добавить лекарства позже.',
-        {
-          reply_markup: new InlineKeyboard()
-            .text('📦 Мои аптечки', 'medkits')
-            .text('⚙️ Настройки', 'settings')
-            .row()
-            .text('📖 Помощь', 'help')
-            .text('🏠 Главное меню', 'main_menu'),
-        }
-      );
-    } else {
-      await ctx.editMessageText('❌ Добавление отменено.', {
-        reply_markup: new InlineKeyboard().text('◀️ К аптечке', `medkit:${medkitId}`),
-      });
-    }
+    await showCancelResult(ctx, fromOnboarding, medkitId);
     return true;
   }
 
@@ -636,7 +610,7 @@ async function sendQuantityUnitPicker(ctx, state) {
     if (QUANTITY_UNITS[i + 2]) keyboard.text(QUANTITY_UNITS[i + 2].label, `addmed:qunit:${QUANTITY_UNITS[i + 2].value}`);
     keyboard.row();
   }
-  await editBotMsg(ctx, state, 'Выберите *единицу измерения*:', keyboard);
+  await editBotMsg(ctx, state, 'Шаг 6/8: Выберите *единицу измерения*:', keyboard);
 }
 
 async function sendPhotosPrompt(ctx, state) {

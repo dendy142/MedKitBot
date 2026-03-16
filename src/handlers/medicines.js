@@ -41,15 +41,15 @@ async function showMedicineCard(ctx, medicineId) {
 
   if (med.notes) text += `📝 ${med.notes}\n`;
 
-  text += `\n${med.is_favorite ? '⭐ В избранном' : ''}`;
+  if (med.is_favorite) text += `\n⭐ В избранном`;
 
   // Keyboard
   const keyboard = new InlineKeyboard();
-  keyboard.text('✏️ Ред.', `med:${med.id}:edit`);
+  keyboard.text('✏️ Изменить', `med:${med.id}:edit`);
   keyboard.text('➕ Пополнить', `med:${med.id}:restock`);
   keyboard.row();
   keyboard.text('📆 Приём', `med:${med.id}:schedule`);
-  keyboard.text('📂 Копир.', `med:${med.id}:copymove`);
+  keyboard.text('📋 Копировать', `med:${med.id}:copymove`);
   keyboard.text(med.is_favorite ? '⭐' : '☆', `med:${med.id}:fav`);
   keyboard.row();
   if (med.photo_file_ids && med.photo_file_ids.length > 0) {

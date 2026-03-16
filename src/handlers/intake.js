@@ -68,7 +68,7 @@ async function buildTodayView(userId, timezone) {
       if (log.status === 'pending' || log.status === 'snoozed') {
         keyboard
           .text(`✅ ${name}`, `intake:${log.id}:take`)
-          .text('❌', `intake:${log.id}:skip`)
+          .text('❌ Пропуск', `intake:${log.id}:skip`)
           .row();
       }
     }

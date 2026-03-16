@@ -33,7 +33,7 @@ export async function handleSearch(ctx) {
       .text('◀️ Главное меню', 'main_menu');
 
     await ctx.reply(
-      `🔍 По запросу «${query}» ничего не найдено.\n\nПопробуйте другое название или перейдите в аптечку.`,
+      `🔍 По запросу «${query}» ничего не найдено.\n\nПопробуйте другой запрос.`,
       { reply_markup: keyboard }
     );
     return;

@@ -3,6 +3,13 @@ import { TIMEZONES, DEFAULT_SETTINGS } from '../config.js';
 import { updateUserSettings, updateUserTimezone } from '../db/queries/users.js';
 import { supabase } from '../db/supabase.js';
 
+const SORT_LABELS = {
+  name: 'По имени',
+  expiry: 'По сроку',
+  category: 'По категории',
+  quantity: 'По остатку',
+};
+
 /**
  * Show main settings menu
  */
@@ -127,26 +134,29 @@ export function registerSettingsHandlers(bot) {
   });
 
   // --- Thresholds ---
+  function buildThresholdView(t) {
+    const check = (val, current) => val === current ? ' ✓' : '';
+    const text = `📐 *Пороги предупреждений*\n\n` +
+      `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
+      `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
+    const keyboard = new InlineKeyboard()
+      .text(`📅 14 дн.${check(14, t.expiry_days)}`, 'set:thresh:expiry:14')
+      .text(`📅 30 дн.${check(30, t.expiry_days)}`, 'set:thresh:expiry:30')
+      .text(`📅 60 дн.${check(60, t.expiry_days)}`, 'set:thresh:expiry:60')
+      .row()
+      .text(`📉 3 шт.${check(3, t.low_stock_count)}`, 'set:thresh:stock:3')
+      .text(`📉 5 шт.${check(5, t.low_stock_count)}`, 'set:thresh:stock:5')
+      .text(`📉 10 шт.${check(10, t.low_stock_count)}`, 'set:thresh:stock:10')
+      .row()
+      .text('◀️ Назад', 'settings');
+    return { text, keyboard };
+  }
+
   bot.callbackQuery('set:thresh', async (ctx) => {
     await ctx.answerCallbackQuery();
     const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
     const t = s.thresholds || DEFAULT_SETTINGS.thresholds;
-
-    const text = `📐 *Пороги предупреждений*\n\n` +
-      `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
-      `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
-
-    const keyboard = new InlineKeyboard()
-      .text('📅 Срок: 14 дн.', 'set:thresh:expiry:14')
-      .text('📅 30 дн.', 'set:thresh:expiry:30')
-      .text('📅 60 дн.', 'set:thresh:expiry:60')
-      .row()
-      .text('📉 Остаток: 3', 'set:thresh:stock:3')
-      .text('📉 5', 'set:thresh:stock:5')
-      .text('📉 10', 'set:thresh:stock:10')
-      .row()
-      .text('◀️ Назад', 'settings');
-
+    const { text, keyboard } = buildThresholdView(t);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -158,21 +168,7 @@ export function registerSettingsHandlers(bot) {
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
     await ctx.answerCallbackQuery(`Порог: ${days} дней`);
-    // Re-render
-    const t = s.thresholds;
-    const text = `📐 *Пороги предупреждений*\n\n` +
-      `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
-      `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
-    const keyboard = new InlineKeyboard()
-      .text('📅 Срок: 14 дн.', 'set:thresh:expiry:14')
-      .text('📅 30 дн.', 'set:thresh:expiry:30')
-      .text('📅 60 дн.', 'set:thresh:expiry:60')
-      .row()
-      .text('📉 Остаток: 3', 'set:thresh:stock:3')
-      .text('📉 5', 'set:thresh:stock:5')
-      .text('📉 10', 'set:thresh:stock:10')
-      .row()
-      .text('◀️ Назад', 'settings');
+    const { text, keyboard } = buildThresholdView(s.thresholds);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -184,20 +180,7 @@ export function registerSettingsHandlers(bot) {
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
     await ctx.answerCallbackQuery(`Порог остатка: ${count} шт.`);
-    const t = s.thresholds;
-    const text = `📐 *Пороги предупреждений*\n\n` +
-      `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
-      `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
-    const keyboard = new InlineKeyboard()
-      .text('📅 Срок: 14 дн.', 'set:thresh:expiry:14')
-      .text('📅 30 дн.', 'set:thresh:expiry:30')
-      .text('📅 60 дн.', 'set:thresh:expiry:60')
-      .row()
-      .text('📉 Остаток: 3', 'set:thresh:stock:3')
-      .text('📉 5', 'set:thresh:stock:5')
-      .text('📉 10', 'set:thresh:stock:10')
-      .row()
-      .text('◀️ Назад', 'settings');
+    const { text, keyboard } = buildThresholdView(s.thresholds);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -285,7 +268,7 @@ export function registerSettingsHandlers(bot) {
     const d = s.display || DEFAULT_SETTINGS.display;
 
     const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${d.default_sort}*\n` +
+      `🔀 Сортировка: *${SORT_LABELS[d.default_sort] || d.default_sort}*\n` +
       `📅 Формат дат: *${d.date_format}*`;
 
     const keyboard = new InlineKeyboard()
@@ -310,10 +293,10 @@ export function registerSettingsHandlers(bot) {
     s.display.default_sort = sort;
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
-    await ctx.answerCallbackQuery(`Сортировка: ${sort}`);
+    await ctx.answerCallbackQuery(`Сортировка: ${SORT_LABELS[sort] || sort}`);
     const d = s.display;
     const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${d.default_sort}*\n` +
+      `🔀 Сортировка: *${SORT_LABELS[d.default_sort] || d.default_sort}*\n` +
       `📅 Формат дат: *${d.date_format}*`;
     const keyboard = new InlineKeyboard()
       .text('По имени', 'set:disp:sort:name')
@@ -339,7 +322,7 @@ export function registerSettingsHandlers(bot) {
     await ctx.answerCallbackQuery(`Формат: ${fmt}`);
     const d = s.display;
     const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${d.default_sort}*\n` +
+      `🔀 Сортировка: *${SORT_LABELS[d.default_sort] || d.default_sort}*\n` +
       `📅 Формат дат: *${d.date_format}*`;
     const keyboard = new InlineKeyboard()
       .text('По имени', 'set:disp:sort:name')

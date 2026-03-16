@@ -85,7 +85,7 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
     const qty = formatQuantity(med.quantity, med.quantity_unit);
     const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format) : '';
     text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
-    text += `   Остаток: ${qty}${expiry ? ' | До: ' + expiry : ''}\n`;
+    text += `   Остаток: ${qty}${expiry ? ' | Годен до: ' + expiry : ''}\n`;
   }
 
   if (medicines.length === 0) {
@@ -114,7 +114,7 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
   keyboard.text('✏️ Редакт.', `medkit:${medkitId}:rename`);
   keyboard.text('🗑 Удалить', `medkit:${medkitId}:delete`);
   keyboard.row();
-  keyboard.text('📂 Архив', `medkit:${medkitId}:archive`);
+  keyboard.text('🗃 Архив', `medkit:${medkitId}:archive`);
   keyboard.text('◀️ Назад', 'medkits');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -258,7 +258,7 @@ export function registerMedkitHandlers(bot) {
           .text('По категории', `medkit:${medkitId}:sort:category`)
           .text('По остатку', `medkit:${medkitId}:sort:quantity`)
           .row()
-          .text('⚠️ Проблемы', `medkit:${medkitId}:sort:problems`)
+          .text('⚠️ Сначала проблемные', `medkit:${medkitId}:sort:problems`)
           .row()
           .text('◀️ Назад', `medkit:${medkitId}`),
       }
@@ -293,7 +293,7 @@ export function registerMedkitHandlers(bot) {
       const qty = formatQuantity(med.quantity, med.quantity_unit);
       const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format) : '';
       text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
-      text += `   Остаток: ${qty}${expiry ? ' | До: ' + expiry : ''}\n`;
+      text += `   Остаток: ${qty}${expiry ? ' | Годен до: ' + expiry : ''}\n`;
     }
 
     const keyboard = new InlineKeyboard();
@@ -406,8 +406,4 @@ export function registerMedkitHandlers(bot) {
     await showMedkit(ctx, medkitId, 0, { filterField: 'tag', filterValue: tag });
   });
 
-  // Share placeholder
-  bot.callbackQuery(/^medkit:([0-9a-f-]+):share$/, async (ctx) => {
-    await ctx.answerCallbackQuery('Скоро! Функция в разработке.');
-  });
 }

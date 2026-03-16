@@ -2,6 +2,18 @@ import { supabase } from '../../src/db/supabase.js';
 import { Bot } from 'grammy';
 import { BOT_TOKEN, CRON_SECRET } from '../../src/config.js';
 
+/**
+ * Proper Russian declension for "день"
+ */
+function getDaysWord(n) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs >= 11 && abs <= 19) return 'дней';
+  if (last === 1) return 'день';
+  if (last >= 2 && last <= 4) return 'дня';
+  return 'дней';
+}
+
 export default async function handler(req, res) {
   // Verify cron secret
   if (req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
@@ -79,7 +91,7 @@ export default async function handler(req, res) {
         const daysLeft = Math.ceil((new Date(med.expiry_date) - now) / (1000 * 60 * 60 * 24));
         const emoji = daysLeft <= 0 ? '❌' : '⚠️';
         text += `${emoji} ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n`;
-        text += `   📦 ${med.medkits?.name} | ${daysLeft <= 0 ? 'ПРОСРОЧЕНО' : `${daysLeft} дн.`}\n\n`;
+        text += `   📦 ${med.medkits?.name} | ${daysLeft <= 0 ? 'Просрочено!' : `${daysLeft} ${getDaysWord(daysLeft)}`}\n\n`;
       }
 
       try {

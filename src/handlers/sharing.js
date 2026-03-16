@@ -681,7 +681,7 @@ export async function handleShareText(ctx, state) {
 
   if (!targetUser) {
     await editBotMsg(ctx, msgId,
-      `❌ Пользователь @${text} не найден.\n\nОн должен сначала написать боту.`,
+      `❌ Пользователь @${text} не найден.\n\nПользователь должен сначала написать боту.`,
       new InlineKeyboard()
         .text('🔄 Попробовать снова', `medkit:${medkitId}:share:user:${role}`)
         .row()

@@ -39,6 +39,18 @@ const DURATION_LABELS = {
 };
 
 /**
+ * Proper Russian declension for "день"
+ */
+function getDaysWord(n) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs >= 11 && abs <= 19) return 'дней';
+  if (last === 1) return 'день';
+  if (last >= 2 && last <= 4) return 'дня';
+  return 'дней';
+}
+
+/**
  * Format schedule info for display
  */
 function formatScheduleInfo(sched) {
@@ -59,7 +71,7 @@ function formatScheduleInfo(sched) {
   if (sched.duration_type === 'indefinite') {
     durStr = '♾ Бессрочно';
   } else if (sched.duration_type === 'days') {
-    durStr = `📅 ${sched.duration_value} дней`;
+    durStr = `📅 ${sched.duration_value} ${getDaysWord(sched.duration_value)}`;
   } else if (sched.duration_type === 'until_date') {
     const d = new Date(sched.duration_value);
     durStr = `📅 До ${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
@@ -98,9 +110,9 @@ async function showScheduleList(ctx, medId) {
       if (sched.status === 'active') {
         keyboard.text('⏸ Пауза', `sched:${sched.id}:pause`);
       } else if (sched.status === 'paused') {
-        keyboard.text('▶️ Возобн.', `sched:${sched.id}:resume`);
+        keyboard.text('▶️ Возобновить', `sched:${sched.id}:resume`);
       }
-      keyboard.text('🗑', `sched:${sched.id}:del`);
+      keyboard.text('🗑 Удалить', `sched:${sched.id}:del`);
       keyboard.row();
     }
   }
@@ -172,7 +184,7 @@ async function showConfirmation(ctx, state, msgId) {
   if (state.durationType === 'indefinite') {
     durStr = '♾ Бессрочно';
   } else if (state.durationType === 'days') {
-    durStr = `📅 ${state.durationValue} дней`;
+    durStr = `📅 ${state.durationValue} ${getDaysWord(state.durationValue)}`;
   } else if (state.durationType === 'until_date') {
     durStr = `📅 До ${state.durationValue}`;
   }
@@ -512,7 +524,7 @@ export function registerScheduleHandlers(bot) {
         reply_markup: new InlineKeyboard()
           .text('♾ Бессрочно', 'sched:dur:indefinite')
           .row()
-          .text('📅 N дней', 'sched:dur:days')
+          .text('📅 Кол-во дней', 'sched:dur:days')
           .text('📅 До даты', 'sched:dur:until_date')
           .row()
           .text('❌ Отмена', `med:${state.medId}:schedule`),
@@ -577,7 +589,7 @@ export function registerScheduleHandlers(bot) {
         reply_markup: new InlineKeyboard()
           .text('♾ Бессрочно', 'sched:dur:indefinite')
           .row()
-          .text('📅 N дней', 'sched:dur:days')
+          .text('📅 Кол-во дней', 'sched:dur:days')
           .text('📅 До даты', 'sched:dur:until_date')
           .row()
           .text('❌ Отмена', `med:${state.medId}:schedule`),

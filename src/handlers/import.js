@@ -5,6 +5,18 @@ import { createMedicine } from '../db/queries/medicines.js';
 import { parseDate } from '../utils/format.js';
 import { BOT_TOKEN } from '../config.js';
 
+/**
+ * Proper Russian declension for "лекарство"
+ */
+function getMedWord(n) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs >= 11 && abs <= 19) return 'лекарств';
+  if (last === 1) return 'лекарство';
+  if (last >= 2 && last <= 4) return 'лекарства';
+  return 'лекарств';
+}
+
 async function getState(userId) {
   const { data } = await supabase
     .from('sessions')
@@ -138,7 +150,7 @@ export async function handleImportDocument(ctx) {
   }
 
   // Build preview text
-  let preview = `📥 *Импорт: найдено ${medicines.length} лекарств*\n\n`;
+  let preview = `📥 *Импорт: найдено ${medicines.length} ${getMedWord(medicines.length)}*\n\n`;
   const showCount = Math.min(medicines.length, 10);
   for (let i = 0; i < showCount; i++) {
     const m = medicines[i];
@@ -256,7 +268,7 @@ export function registerImportHandlers(bot) {
 
     await clearState(ctx.dbUser.id);
 
-    let resultText = `✅ Импортировано *${created}* лекарств в аптечку *«${medkit.name}»*`;
+    let resultText = `✅ Импортировано *${created}* ${getMedWord(created)} в аптечку *«${medkit.name}»*`;
     if (errors > 0) {
       resultText += `\n⚠️ Не удалось импортировать: ${errors}`;
     }

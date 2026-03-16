@@ -205,11 +205,12 @@ export default async function handler(req, res) {
 
       const medName = log.medicines?.name || 'Лекарство';
       const dose = log.schedules?.dose_per_intake || 1;
+      const unit = log.medicines?.quantity_unit || 'шт';
       const medNotes = log.medicines?.notes;
 
       let text = `💊 *Напоминание о приёме*\n\n`;
       text += `${medName}${log.medicines?.dosage ? ' ' + log.medicines.dosage : ''}\n`;
-      text += `💊 Доза: ${dose}\n`;
+      text += `💊 Доза: ${dose} ${unit}\n`;
 
       if (medNotes) text += `📝 ${medNotes}\n`;
 

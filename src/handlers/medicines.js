@@ -201,9 +201,9 @@ export function registerMedicineHandlers(bot) {
     let amounts;
     if (unit === 'мл' || unit === 'капли') {
       amounts = [10, 50, 100, 250];
-    } else if (unit === 'таблеток' || unit === 'капсул') {
+    } else if (unit === 'таблетки' || unit === 'капсулы') {
       amounts = [10, 20, 30, 60];
-    } else if (unit === 'ампул') {
+    } else if (unit === 'ампулы') {
       amounts = [1, 3, 5, 10];
     } else {
       amounts = [1, 5, 10, 30];

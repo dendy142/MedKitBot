@@ -71,6 +71,7 @@ export function formatQuantity(quantity, unit) {
     'ампулы': 'амп.',
     'пакетики': 'пак.',
     'шт': 'шт.',
+    'другое': 'шт.',
   };
   return `${quantity} ${unitMap[unit] || unit}`;
 }

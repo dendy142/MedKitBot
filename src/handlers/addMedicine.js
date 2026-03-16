@@ -67,6 +67,7 @@ const ONBOARDING_NAV_KEYBOARD = new InlineKeyboard()
 
 // --- Progress bar helpers ---
 const STAGES = ['name', 'dosage', 'category', 'tags', 'expiry', 'quantity', 'photos', 'notes'];
+const QUICK_STAGES = ['name', 'expiry', 'quantity'];
 const STAGE_LABELS = {
   name: 'Название',
   dosage: 'Дозировка',
@@ -94,11 +95,13 @@ function stepToStage(step) {
 function buildStageHeader(state) {
   const stage = stepToStage(state.step);
   if (stage === 'confirm') return '📋 *Проверьте данные:*';
-  const idx = STAGES.indexOf(stage);
-  const total = STAGES.length;
-  const bar = formatProgressBar(idx + 1, total, 14);
+  const stages = state.quickAdd ? QUICK_STAGES : STAGES;
+  const idx = stages.indexOf(stage);
+  const total = stages.length;
+  const bar = formatProgressBar(idx >= 0 ? idx + 1 : 1, total, 14);
+  const prefix = state.quickAdd ? '⚡' : '💊';
   const label = STAGE_LABELS[stage] || stage;
-  return `💊 *Добавление в «${state.medkitName}»*\n${bar} ${label}`;
+  return `${prefix} *Добавление в «${state.medkitName}»*\n${bar} ${label}`;
 }
 
 // --- Skip button labels ---

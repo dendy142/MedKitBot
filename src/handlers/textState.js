@@ -103,7 +103,7 @@ export async function handleTextState(ctx) {
     await clearState(ctx.dbUser.id);
     await addToShoppingList(ctx.dbUser.id, text);
     await editBotMsg(ctx, msgId,
-      `✅ *${text}* добавлен в список покупок!`,
+      `✅ *${text}* — добавлено в список покупок!`,
       new InlineKeyboard()
         .text('➕ Ещё', 'shop:add')
         .text('🛒 К списку', 'shopping')

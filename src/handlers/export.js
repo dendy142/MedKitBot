@@ -4,6 +4,18 @@ import { getMedkitMedicines } from '../db/queries/medicines.js';
 import { formatDate } from '../utils/format.js';
 
 /**
+ * Proper Russian declension for "лекарство"
+ */
+function getMedWord(n) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs >= 11 && abs <= 19) return 'лекарств';
+  if (last === 1) return 'лекарство';
+  if (last >= 2 && last <= 4) return 'лекарства';
+  return 'лекарств';
+}
+
+/**
  * Escape a CSV field (semicolon-separated): wrap in quotes if needed
  */
 function csvField(value) {
@@ -119,7 +131,7 @@ async function handleExportSelect(ctx, target) {
 
   await ctx.answerCallbackQuery();
   await ctx.replyWithDocument(inputFile, {
-    caption: `📤 Экспорт завершён — ${allMedicines.length} лекарств`,
+    caption: `📤 Экспорт завершён — ${allMedicines.length} ${getMedWord(allMedicines.length)}`,
   });
 }
 

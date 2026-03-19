@@ -90,7 +90,8 @@ async function showMedicineCard(ctx, medicineId) {
       .from('intake_logs')
       .select('status, planned_at')
       .eq('medicine_id', medicineId)
-      .order('planned_at', { ascending: false });
+      .order('planned_at', { ascending: false })
+      .limit(90);
 
     if (medLogs && medLogs.length > 0) {
       const taken = medLogs.filter(l => l.status === 'taken').length;

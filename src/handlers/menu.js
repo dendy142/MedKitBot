@@ -92,11 +92,12 @@ async function getProfileCompletion(userId, settings, medkits) {
  * Build dashboard text for main menu
  */
 async function buildDashboard(userId, settings, t, dbUser) {
-  // Fetch medkits, shopping count, and intake logs in parallel
-  const [medkits, shopCount, intakeLogs] = await Promise.all([
+  // Fetch all independent data in a single parallel batch
+  const [medkits, shopCount, intakeLogs, profileLines] = await Promise.all([
     getUserMedkits(userId),
     countShoppingItems(userId),
     getTodayIntakeLogs(userId, settings?.timezone || 'Europe/Moscow'),
+    getProfileDashboardLines(userId, t).catch(() => ''),
   ]);
   const medkitCount = medkits.length;
   const totalIntakes = intakeLogs.length;
@@ -110,35 +111,22 @@ async function buildDashboard(userId, settings, t, dbUser) {
   let expiringSoonCount = 0;
   let hasAttention = false;
 
+  // Launch completion + medicine counts in parallel (both depend on medkits)
+  let completion = null;
   if (medkitCount > 0) {
     const medkitIds = medkits.map(m => m.id);
     const todayStr = new Date().toISOString().split('T')[0];
     const thresholdDate = new Date(Date.now() + thresholds.expiry_days * 86400000);
     const thresholdDateStr = thresholdDate.toISOString().split('T')[0];
 
-    // Run all medicine count queries in parallel
-    const [{ count: expCount }, { count: expiredC }, { count: soonCount }, { count: lowCount }] = await Promise.all([
+    // Fetch expiring medicines, low stock, and profile completion all in parallel
+    const [{ data: expiringMeds }, { count: lowCount }, completionResult] = await Promise.all([
       supabase
         .from('medicines')
-        .select('*', { count: 'exact', head: true })
+        .select('expiry_date')
         .in('medkit_id', medkitIds)
         .eq('is_archived', false)
         .not('expiry_date', 'is', null)
-        .lte('expiry_date', thresholdDateStr),
-      supabase
-        .from('medicines')
-        .select('*', { count: 'exact', head: true })
-        .in('medkit_id', medkitIds)
-        .eq('is_archived', false)
-        .not('expiry_date', 'is', null)
-        .lte('expiry_date', todayStr),
-      supabase
-        .from('medicines')
-        .select('*', { count: 'exact', head: true })
-        .in('medkit_id', medkitIds)
-        .eq('is_archived', false)
-        .not('expiry_date', 'is', null)
-        .gt('expiry_date', todayStr)
         .lte('expiry_date', thresholdDateStr),
       supabase
         .from('medicines')
@@ -147,13 +135,21 @@ async function buildDashboard(userId, settings, t, dbUser) {
         .eq('is_archived', false)
         .lte('quantity', thresholds.low_stock_count)
         .gt('quantity', 0),
+      getProfileCompletion(userId, dbUser, medkits).catch(() => null),
     ]);
 
-    expiringCount = expCount || 0;
-    expiredCount = expiredC || 0;
-    expiringSoonCount = soonCount || 0;
+    completion = completionResult;
+
+    // Compute expired vs expiring-soon from single result set
+    for (const m of (expiringMeds || [])) {
+      if (m.expiry_date <= todayStr) expiredCount++;
+      else expiringSoonCount++;
+    }
+    expiringCount = (expiringMeds || []).length;
     lowStockCount = lowCount || 0;
     hasAttention = expiredCount > 0 || expiringSoonCount > 0;
+  } else {
+    completion = await getProfileCompletion(userId, dbUser, medkits).catch(() => null);
   }
 
   let text = t('menu.title');
@@ -178,24 +174,16 @@ async function buildDashboard(userId, settings, t, dbUser) {
     }
   }
 
-  // Fetch profile dashboard lines and completion in parallel
-  try {
-    const [profileLines, completion] = await Promise.all([
-      getProfileDashboardLines(userId, t).catch(() => ''),
-      getProfileCompletion(userId, dbUser, medkits).catch(() => null),
-    ]);
+  if (profileLines) {
+    text += '\n' + profileLines;
+  }
 
-    if (profileLines) {
-      text += '\n' + profileLines;
+  if (completion && completion.pct < 100) {
+    text += '\n' + t('onboarding.progress_title', { pct: completion.pct }) + '\n';
+    for (const c of completion.criteria) {
+      text += t(`onboarding.${c.key}`) + '\n';
     }
-
-    if (completion && completion.pct < 100) {
-      text += '\n' + t('onboarding.progress_title', { pct: completion.pct }) + '\n';
-      for (const c of completion.criteria) {
-        text += t(`onboarding.${c.key}`) + '\n';
-      }
-    }
-  } catch { /* ignore dashboard errors */ }
+  }
 
   return { text, hasAttention };
 }

@@ -58,27 +58,32 @@ export default async function handler(req, res) {
       byUser[member.user_id].push(...userMeds);
     }
 
+    // Batch: check which users were already notified today & fetch user data
+    const allUserIds = Object.keys(byUser);
+    const [{ data: alreadyNotifiedLogs }, { data: allUsers }] = await Promise.all([
+      supabase
+        .from('action_logs')
+        .select('user_id')
+        .in('user_id', allUserIds)
+        .eq('action', 'expiry_notification')
+        .gte('created_at', todayStr + 'T00:00:00Z'),
+      supabase
+        .from('users')
+        .select('id, telegram_id, settings')
+        .in('id', allUserIds),
+    ]);
+    const alreadyNotifiedUserIds = new Set((alreadyNotifiedLogs || []).map(l => l.user_id));
+    const userMap = {};
+    for (const u of (allUsers || [])) userMap[u.id] = u;
+
     let notified = 0;
     for (const [userId, meds] of Object.entries(byUser)) {
+      if (alreadyNotifiedUserIds.has(userId)) continue;
+
       // Deduplicate medicines (user may be member of multiple medkits)
       const uniqueMeds = [...new Map(meds.map(m => [m.id, m])).values()];
 
-      // Check if already notified today
-      const { count } = await supabase
-        .from('action_logs')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .eq('action', 'expiry_notification')
-        .gte('created_at', todayStr + 'T00:00:00Z');
-
-      if (count > 0) continue; // skip, already notified
-
-      const { data: user } = await supabase
-        .from('users')
-        .select('telegram_id, settings')
-        .eq('id', userId)
-        .single();
-
+      const user = userMap[userId];
       if (!user || !user.settings?.notifications?.expiry_alerts) continue;
 
       const lang = user.settings?.language || 'ru';
@@ -150,13 +155,17 @@ export default async function handler(req, res) {
           lowByUser[member.user_id].push(...userMeds);
         }
 
-        for (const [userId, meds] of Object.entries(lowByUser)) {
-          const { data: user } = await supabase
-            .from('users')
-            .select('telegram_id, settings')
-            .eq('id', userId)
-            .single();
+        // Batch-fetch all low-stock users
+        const lowUserIds = Object.keys(lowByUser);
+        const { data: lowUsers } = await supabase
+          .from('users')
+          .select('id, telegram_id, settings')
+          .in('id', lowUserIds);
+        const lowUserMap = {};
+        for (const u of (lowUsers || [])) lowUserMap[u.id] = u;
 
+        for (const [userId, meds] of Object.entries(lowByUser)) {
+          const user = lowUserMap[userId];
           if (!user || !user.settings?.notifications?.low_stock_alerts) continue;
 
           const thresholds = user.settings?.thresholds || {};

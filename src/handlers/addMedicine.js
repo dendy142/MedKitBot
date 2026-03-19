@@ -317,8 +317,11 @@ export async function handleAddMedicineCallback(ctx, action) {
     const medId = parts[0];
     const medkitId = parts[1];
     await ctx.answerCallbackQuery();
+    // Fetch medicine name for the success message
+    const { data: med } = await supabase.from('medicines').select('name').eq('id', medId).single();
+    const medName = med?.name || '—';
     await ctx.editMessageText(
-      ctx.t('addmed.success', { name: '—' }),
+      ctx.t('addmed.success', { name: medName }),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
@@ -579,26 +582,6 @@ export async function handleAddMedicineCallback(ctx, action) {
     state.data.expiryDate = null;
     await setState(ctx.dbUser.id, state);
     await sendExpiryYearPicker(ctx, state);
-    return true;
-  }
-
-  // #39 Suggest schedule — user declines (state already cleared at this point)
-  if (action.startsWith('addmed:sched_dismiss:')) {
-    const parts = action.replace('addmed:sched_dismiss:', '').split(':');
-    const medId = parts[0];
-    const medkitId = parts[1];
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText(
-      ctx.t('addmed.success', { name: '—' }),
-      {
-        parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard()
-          .text(ctx.t('addmed.btn_open'), `med:${medId}`)
-          .text(ctx.t('common.add_more'), `medkit:${medkitId}:add`)
-          .row()
-          .text(ctx.t('medkit.btn_to_medkit'), `medkit:${medkitId}`),
-      }
-    );
     return true;
   }
 

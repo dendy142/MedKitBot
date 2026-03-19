@@ -176,20 +176,51 @@ export default async function handler(req, res) {
 
             if (alreadyNotified > 0) continue;
 
+            // #28 Auto-add to shopping list if setting enabled
+            let autoAdded = false;
+            if (user.settings?.autoShoppingList) {
+              // Check for existing non-bought item with same medicine_id
+              const { data: existingShopItem } = await supabase
+                .from('shopping_list')
+                .select('id')
+                .eq('user_id', userId)
+                .eq('medicine_id', med.id)
+                .eq('is_bought', false)
+                .limit(1);
+
+              if (!existingShopItem || existingShopItem.length === 0) {
+                await supabase.from('shopping_list').insert({
+                  user_id: userId,
+                  medicine_id: med.id,
+                  name: med.name,
+                  is_bought: false,
+                });
+                autoAdded = true;
+              }
+            }
+
             try {
-              const keyboard = {
-                inline_keyboard: [
-                  [
-                    { text: t('cron.btn_add_to_shop', lang), callback_data: `med:${med.id}:shop` },
-                    { text: t('cron.btn_later', lang), callback_data: 'noop' },
-                  ],
-                ],
-              };
+              let msgText = t('cron.low_stock_warning', lang, { name: med.name, count: `${med.quantity} ${med.quantity_unit || 'шт'}` });
+
+              if (autoAdded) {
+                msgText += t('cron.auto_added_shop', lang, { name: med.name });
+              }
+
+              const buttons = autoAdded
+                ? [[{ text: t('cron.btn_later', lang), callback_data: 'noop' }]]
+                : [
+                    [
+                      { text: t('cron.btn_add_to_shop', lang), callback_data: `med:${med.id}:shop` },
+                      { text: t('cron.btn_later', lang), callback_data: 'noop' },
+                    ],
+                  ];
+
+              const keyboard = { inline_keyboard: buttons };
 
               await bot.api.sendMessage(
                 user.telegram_id,
-                t('cron.low_stock_warning', lang, { name: med.name, count: `${med.quantity} ${med.quantity_unit || 'шт'}` }),
-                { reply_markup: keyboard }
+                msgText,
+                { reply_markup: keyboard, parse_mode: 'Markdown' }
               );
 
               await supabase.from('action_logs').insert({

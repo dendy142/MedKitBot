@@ -31,6 +31,13 @@ export const DEFAULT_SETTINGS = {
     include: ['intakes', 'expiry', 'low_stock'],
     days: 'daily',
   },
+  quiet_hours: {
+    enabled: false,
+    from: '23:00',
+    to: '07:00',
+  },
+  autoShoppingList: false,
+  weeklyReport: false,
   display: {
     default_sort: 'name',
     date_format: 'DD.MM.YYYY',

@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getTodayIntakeLogs, markIntakeTaken, markIntakeSkipped } from '../db/queries/intakeLogs.js';
 import { getMedicine, updateMedicine } from '../db/queries/medicines.js';
 import { getSchedule } from '../db/queries/schedules.js';
+import { addToShoppingList } from '../db/queries/shoppingList.js';
 import { supabase } from '../db/supabase.js';
 import { formatQuantity } from '../utils/format.js';
 
@@ -24,6 +25,46 @@ function statusEmoji(status) {
     case 'skipped': return '❌';
     case 'snoozed': return '⏰';
     default: return '⏳';
+  }
+}
+
+/**
+ * #28 Auto-add to shopping list when medicine is low stock
+ * Checks settings.autoShoppingList and thresholds, adds if not duplicate
+ */
+async function checkAutoShoppingList(ctx, med, newQty) {
+  try {
+    const settings = ctx.dbUser?.settings || {};
+    if (!settings.autoShoppingList) return;
+
+    const thresholds = settings.thresholds || {};
+    const lowCount = thresholds.low_stock_count || 5;
+    const lowPercent = thresholds.low_stock_percent || 20;
+    const isLow = newQty <= lowCount || (med.initial_quantity > 0 && (newQty / med.initial_quantity) * 100 <= lowPercent);
+
+    if (!isLow) return;
+
+    // Check for duplicate (unbought item with same medicine_id)
+    const { data: existing } = await supabase
+      .from('shopping_list')
+      .select('id')
+      .eq('medicine_id', med.id)
+      .eq('is_bought', false)
+      .limit(1);
+
+    if (existing && existing.length > 0) return;
+
+    await addToShoppingList(ctx.dbUser.id, med.name, med.id, med.medkit_id);
+
+    // Send notification about auto-add
+    try {
+      await ctx.api.sendMessage(ctx.chat.id,
+        ctx.t('cron.auto_added_shop', { name: med.name }),
+        { parse_mode: 'Markdown' }
+      );
+    } catch { /* ignore notification errors */ }
+  } catch (e) {
+    console.error('Error in auto-shopping list check:', e);
   }
 }
 
@@ -119,6 +160,27 @@ export function registerIntakeHandlers(bot) {
           const dose = schedule?.dose_per_intake || 1;
           const newQty = Math.max(0, med.quantity - dose);
           await updateMedicine(log.medicine_id, { quantity: newQty });
+
+          // #40 Auto-pause schedules when quantity reaches zero
+          if (newQty <= 0) {
+            const { data: activeScheds } = await supabase
+              .from('schedules')
+              .select('id')
+              .eq('medicine_id', log.medicine_id)
+              .eq('status', 'active');
+            if (activeScheds && activeScheds.length > 0) {
+              await supabase
+                .from('schedules')
+                .update({ status: 'paused' })
+                .in('id', activeScheds.map(s => s.id));
+              // Notify user about auto-pause after re-rendering
+              try {
+                await ctx.api.sendMessage(ctx.chat.id,
+                  ctx.t('schedule.auto_pause', { name: med.name, count: activeScheds.length })
+                );
+              } catch { /* ignore notification errors */ }
+            }
+          }
         }
       }
 
@@ -218,6 +280,26 @@ export function registerIntakeHandlers(bot) {
           const dose = schedule?.dose_per_intake || 1;
           const newQty = Math.max(0, med.quantity - dose);
           await updateMedicine(log.medicine_id, { quantity: newQty });
+
+          // #40 Auto-pause schedules when quantity reaches zero
+          if (newQty <= 0) {
+            const { data: activeScheds } = await supabase
+              .from('schedules')
+              .select('id')
+              .eq('medicine_id', log.medicine_id)
+              .eq('status', 'active');
+            if (activeScheds && activeScheds.length > 0) {
+              await supabase
+                .from('schedules')
+                .update({ status: 'paused' })
+                .in('id', activeScheds.map(s => s.id));
+              try {
+                await ctx.api.sendMessage(ctx.chat.id,
+                  ctx.t('schedule.auto_pause', { name: med.name, count: activeScheds.length })
+                );
+              } catch { /* ignore notification errors */ }
+            }
+          }
         }
       }
 
@@ -230,6 +312,59 @@ export function registerIntakeHandlers(bot) {
       console.error('Error marking intake taken from reminder:', e);
       await ctx.answerCallbackQuery(ctx.t('intake.skipped_error'));
     }
+  });
+
+  // Batch take from grouped reminder (#44)
+  bot.callbackQuery(/^intake:batch_take:(.+)$/, async (ctx) => {
+    const logIdsStr = ctx.match[1];
+    const logIds = logIdsStr.split(',');
+
+    for (const logId of logIds) {
+      try {
+        const log = await markIntakeTaken(logId);
+
+        // Subtract dose from medicine quantity
+        if (log.medicine_id) {
+          const med = await getMedicine(log.medicine_id);
+          if (med) {
+            const schedule = log.schedule_id ? await getSchedule(log.schedule_id) : null;
+            const dose = schedule?.dose_per_intake || 1;
+            const newQty = Math.max(0, med.quantity - dose);
+            await updateMedicine(log.medicine_id, { quantity: newQty });
+
+            // #40 Auto-pause schedules when quantity reaches zero
+            if (newQty <= 0) {
+              const { data: activeScheds } = await supabase
+                .from('schedules')
+                .select('id')
+                .eq('medicine_id', log.medicine_id)
+                .eq('status', 'active');
+              if (activeScheds && activeScheds.length > 0) {
+                await supabase
+                  .from('schedules')
+                  .update({ status: 'paused' })
+                  .in('id', activeScheds.map(s => s.id));
+                try {
+                  await ctx.api.sendMessage(ctx.chat.id,
+                    ctx.t('schedule.auto_pause', { name: med.name, count: activeScheds.length })
+                  );
+                } catch { /* ignore notification errors */ }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`Error marking batch intake taken (${logId}):`, e);
+      }
+    }
+
+    await ctx.answerCallbackQuery(ctx.t('intake.taken_toast'));
+    try {
+      await ctx.editMessageText(
+        ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.taken_label'),
+        { parse_mode: 'Markdown' }
+      );
+    } catch { /* message may already be edited */ }
   });
 
   // Skip from reminder message

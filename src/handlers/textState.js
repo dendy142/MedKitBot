@@ -89,13 +89,41 @@ export async function handleTextState(ctx) {
       return true;
     }
 
-    const newQty = med.quantity + num;
+    const oldQty = med.quantity;
+    const newQty = oldQty + num;
     await updateMedicine(state.medId, { quantity: newQty });
-    await logMedicineChange(state.medId, ctx.dbUser.id, 'quantity', med.quantity, newQty);
-    await editBotMsg(ctx, msgId,
-      ctx.t('medicine.restock_done', { quantity: formatQuantity(newQty, med.quantity_unit) }),
-      new InlineKeyboard().text(ctx.t('medicine.btn_to_medicine'), `med:${state.medId}`)
-    );
+    await logMedicineChange(state.medId, ctx.dbUser.id, 'quantity', oldQty, newQty);
+
+    const keyboard = new InlineKeyboard();
+    let responseText = ctx.t('medicine.restock_done', { quantity: formatQuantity(newQty, med.quantity_unit) });
+
+    // #41 Suggest resuming paused schedules when restocking from zero
+    if (oldQty <= 0) {
+      const { data: pausedScheds } = await supabase
+        .from('schedules')
+        .select('id, time_value, dose_per_intake')
+        .eq('medicine_id', state.medId)
+        .eq('status', 'paused');
+
+      if (pausedScheds && pausedScheds.length > 0) {
+        responseText += '\n\n' + ctx.t('schedule.resume_suggest', { name: med.name, count: pausedScheds.length });
+        if (pausedScheds.length === 1) {
+          keyboard.text(ctx.t('schedule.btn_resume_yes'), `sched:resume:${pausedScheds[0].id}`);
+        } else {
+          for (const s of pausedScheds) {
+            keyboard.text(`▶️ ${s.time_value} (${s.dose_per_intake})`, `sched:resume:${s.id}`);
+          }
+          keyboard.row();
+          keyboard.text(ctx.t('schedule.btn_resume_all'), `sched:resume_all:${state.medId}`);
+        }
+        keyboard.text(ctx.t('schedule.btn_resume_no'), `noop`);
+        keyboard.row();
+      }
+    }
+
+    keyboard.text(ctx.t('medicine.btn_to_medicine'), `med:${state.medId}`);
+
+    await editBotMsg(ctx, msgId, responseText, keyboard);
     return true;
   }
 
@@ -161,6 +189,54 @@ export async function handleTextState(ctx) {
 
     await updateMedicine(state.medId, updateData);
     await logMedicineChange(state.medId, ctx.dbUser.id, field, med[field], newValue);
+
+    // #40 Auto-pause active schedules when quantity is edited to zero
+    if (field === 'quantity' && updateData.quantity <= 0) {
+      const { data: activeScheds } = await supabase
+        .from('schedules')
+        .select('id')
+        .eq('medicine_id', state.medId)
+        .eq('status', 'active');
+      if (activeScheds && activeScheds.length > 0) {
+        await supabase
+          .from('schedules')
+          .update({ status: 'paused' })
+          .in('id', activeScheds.map(s => s.id));
+        await editBotMsg(ctx, msgId,
+          ctx.t('medicine.edit_done') + '\n\n' + ctx.t('schedule.auto_pause', { name: med.name, count: activeScheds.length }),
+          new InlineKeyboard().text(ctx.t('medicine.btn_to_medicine'), `med:${state.medId}`)
+        );
+        return true;
+      }
+    }
+
+    // #41 Suggest resuming paused schedules when quantity is edited from zero to positive
+    if (field === 'quantity' && med.quantity <= 0 && updateData.quantity > 0) {
+      const { data: pausedScheds } = await supabase
+        .from('schedules')
+        .select('id, time_value, dose_per_intake')
+        .eq('medicine_id', state.medId)
+        .eq('status', 'paused');
+      if (pausedScheds && pausedScheds.length > 0) {
+        const responseText = ctx.t('medicine.edit_done') + '\n\n' + ctx.t('schedule.resume_suggest', { name: med.name, count: pausedScheds.length });
+        const keyboard = new InlineKeyboard();
+        if (pausedScheds.length === 1) {
+          keyboard.text(ctx.t('schedule.btn_resume_yes'), `sched:resume:${pausedScheds[0].id}`);
+        } else {
+          for (const s of pausedScheds) {
+            keyboard.text(`▶️ ${s.time_value} (${s.dose_per_intake})`, `sched:resume:${s.id}`);
+          }
+          keyboard.row();
+          keyboard.text(ctx.t('schedule.btn_resume_all'), `sched:resume_all:${state.medId}`);
+        }
+        keyboard.text(ctx.t('schedule.btn_resume_no'), `noop`);
+        keyboard.row();
+        keyboard.text(ctx.t('medicine.btn_to_medicine'), `med:${state.medId}`);
+        await editBotMsg(ctx, msgId, responseText, keyboard);
+        return true;
+      }
+    }
+
     await editBotMsg(ctx, msgId,
       ctx.t('medicine.edit_done'),
       new InlineKeyboard().text(ctx.t('medicine.btn_to_medicine'), `med:${state.medId}`)
@@ -194,8 +270,8 @@ export async function handleTextState(ctx) {
     return true;
   }
 
-  // Settings text states (day periods, digest time)
-  if (state.action === 'set_period' || state.action === 'set_digest_time') {
+  // Settings text states (day periods, digest time, quiet hours)
+  if (state.action === 'set_period' || state.action === 'set_digest_time' || state.action === 'set_quiet_from' || state.action === 'set_quiet_to') {
     const result = await handleSettingsTextState(state, text, ctx);
     if (result === 'keep_state') {
       // Don't clear state — user needs to retry

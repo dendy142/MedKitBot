@@ -12,7 +12,7 @@ Telegram bot @my_med_kit_bot for managing home medicine cabinets. Russian-only i
 - **Bot framework**: grammY (Telegram Bot API)
 - **Database**: Supabase PostgreSQL (service role key, no RLS enforcement)
 - **Hosting**: Vercel serverless (webhook at `api/webhook.js`)
-- **Cron**: Vercel Cron Jobs (`api/cron/expiry-check.js` daily at 6am, `api/cron/reminders.js` every 5 min, `api/cron/digest.js` hourly)
+- **Cron**: Vercel Cron Jobs (`api/cron/expiry-check.js` daily at 6am, `api/cron/reminders.js` every 5 min, `api/cron/digest.js` hourly, `api/cron/weekly-report.js` Mondays at 8am)
 
 ## Commands
 

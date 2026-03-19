@@ -583,6 +583,16 @@ export default {
     btn_weekly_on: '🔔 Включить',
     btn_weekly_off: '🔕 Выключить',
     weekly_label: '📊 Недельный отчёт: {value}',
+    // Auto shopping (#28)
+    auto_shop_label: '🛒 Авто-покупки: {value}',
+    btn_auto_shop: '🛒 Авто-покупки',
+    auto_shop_title: '🛒 *Авто-добавление в покупки*\n\nКогда лекарство заканчивается, оно будет автоматически добавлено в список покупок.\n\n',
+    auto_shop_status_on: 'Статус: ✅ Включено',
+    auto_shop_status_off: 'Статус: ❌ Выключено',
+    auto_shop_on_toast: 'Авто-покупки включены',
+    auto_shop_off_toast: 'Авто-покупки выключены',
+    btn_auto_shop_on: '🔔 Включить',
+    btn_auto_shop_off: '🔕 Выключить',
     // Notification style (#113)
     notif_style_title: 'Стиль уведомлений:',
     notif_style_brief: 'Краткие',
@@ -813,6 +823,8 @@ export default {
     low_stock_warning: '⚠️ {name} заканчивается (осталось {count}). Добавить в список покупок?',
     btn_add_to_shop: '🛒 Добавить',
     btn_later: 'Позже',
+    // Auto-add to shopping (#28)
+    auto_added_shop: '\n🛒 _{name}_ автоматически добавлен в список покупок.',
     // Weekly report (#45)
     weekly_title: '📊 *Еженедельный отчёт*\n\n',
     weekly_adherence: '💊 Соблюдение приёмов: {pct}% ({taken}/{planned})',
@@ -900,10 +912,15 @@ export default {
 
   // ── Backup (#100) ────────────────────────────────────────────────
   backup: {
-    export_confirm: 'Экспортировать все данные в JSON?',
+    export_confirm: '📦 *Бэкап данных*\n\nЭкспортировать все данные (аптечки, лекарства, расписания) в JSON-файл?',
     export_done: '✅ Бэкап создан.',
-    import_confirm: 'Будет создано: {medkits} аптечек, {medicines} лекарств, {schedules} расписаний. Продолжить?',
-    import_done: '✅ Данные восстановлены.',
+    btn_export: '📦 Бэкап (JSON)',
+    btn_import_json: '📥 Восстановить из JSON',
+    import_confirm: '📥 *Восстановление из бэкапа*\n\nБудет создано:\n📦 {medkits} аптечек\n💊 {medicines} лекарств\n📆 {schedules} расписаний\n\nПродолжить?',
+    import_done: '✅ Данные восстановлены: {medkits} аптечек, {medicines} лекарств, {schedules} расписаний.',
+    import_errors: '\n⚠️ Ошибок: {count}',
+    import_invalid: '⚠️ Файл не является корректным бэкапом. Убедитесь, что это JSON-файл, экспортированный из бота.',
+    import_send_json: '📥 *Восстановление из бэкапа*\n\nОтправьте JSON-файл, экспортированный из бота.',
   },
 
   // ── Format helpers (used by format.js) ───────────────────────────

@@ -754,6 +754,40 @@ export function registerScheduleHandlers(bot) {
     }
   });
 
+  // #41 Resume single paused schedule (from restock suggestion)
+  bot.callbackQuery(/^sched:resume:([0-9a-f-]+)$/, async (ctx) => {
+    const schedId = ctx.match[1];
+    await ctx.answerCallbackQuery();
+    try {
+      const sched = await updateScheduleStatus(schedId, 'active');
+      const med = sched ? await getMedicine(sched.medicine_id) : null;
+      if (med) {
+        await showScheduleList(ctx, med.id);
+      }
+    } catch (e) {
+      console.error('Error resuming schedule from restock:', e);
+      await ctx.answerCallbackQuery(ctx.t('schedule.error_generic'));
+    }
+  });
+
+  // #41 Resume all paused schedules for a medicine (from restock suggestion)
+  bot.callbackQuery(/^sched:resume_all:([0-9a-f-]+)$/, async (ctx) => {
+    const medId = ctx.match[1];
+    await ctx.answerCallbackQuery();
+    const { data: pausedScheds } = await supabase
+      .from('schedules')
+      .select('id')
+      .eq('medicine_id', medId)
+      .eq('status', 'paused');
+    if (pausedScheds && pausedScheds.length > 0) {
+      await supabase
+        .from('schedules')
+        .update({ status: 'active' })
+        .in('id', pausedScheds.map(s => s.id));
+    }
+    await showScheduleList(ctx, medId);
+  });
+
   // Pause schedule
   bot.callbackQuery(/^sched:([0-9a-f-]+):pause$/, async (ctx) => {
     const schedId = ctx.match[1];

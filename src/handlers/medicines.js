@@ -228,10 +228,41 @@ export function registerMedicineHandlers(bot) {
     const amount = parseInt(ctx.match[2]);
     const med = await getMedicine(medId);
     if (!med) return;
-    const newQty = med.quantity + amount;
+    const oldQty = med.quantity;
+    const newQty = oldQty + amount;
     const newInitial = Math.max(med.initial_quantity || 0, newQty);
     await updateMedicine(medId, { quantity: newQty, initial_quantity: newInitial });
-    await logMedicineChange(medId, ctx.dbUser.id, 'quantity', med.quantity, newQty);
+    await logMedicineChange(medId, ctx.dbUser.id, 'quantity', oldQty, newQty);
+
+    // #41 Suggest resuming paused schedules when restocking from zero
+    if (oldQty <= 0) {
+      const { data: pausedScheds } = await supabase
+        .from('schedules')
+        .select('id, time_value, dose_per_intake')
+        .eq('medicine_id', medId)
+        .eq('status', 'paused');
+
+      if (pausedScheds && pausedScheds.length > 0) {
+        const text = ctx.t('medicine.restock_done', { quantity: formatQuantity(newQty, med.quantity_unit) })
+          + '\n\n' + ctx.t('schedule.resume_suggest', { name: med.name, count: pausedScheds.length });
+        const keyboard = new InlineKeyboard();
+        if (pausedScheds.length === 1) {
+          keyboard.text(ctx.t('schedule.btn_resume_yes'), `sched:resume:${pausedScheds[0].id}`);
+        } else {
+          for (const s of pausedScheds) {
+            keyboard.text(`▶️ ${s.time_value} (${s.dose_per_intake})`, `sched:resume:${s.id}`);
+          }
+          keyboard.row();
+          keyboard.text(ctx.t('schedule.btn_resume_all'), `sched:resume_all:${medId}`);
+        }
+        keyboard.text(ctx.t('schedule.btn_resume_no'), `noop`);
+        keyboard.row();
+        keyboard.text(ctx.t('medicine.btn_to_medicine'), `med:${medId}`);
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+        return;
+      }
+    }
+
     await showMedicineCard(ctx, medId);
   });
 

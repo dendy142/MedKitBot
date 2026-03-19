@@ -30,13 +30,13 @@ function statusEmoji(status) {
 /**
  * Build today's intake view text and keyboard
  */
-async function buildTodayView(userId, timezone) {
+async function buildTodayView(ctx, userId, timezone) {
   const logs = await getTodayIntakeLogs(userId, timezone);
 
   if (logs.length === 0) {
     return {
-      text: '💊 *Приём на сегодня*\n\nНет запланированных приёмов.\n\nДобавьте курс приёма через карточку лекарства (📆 Приём).',
-      keyboard: new InlineKeyboard().text('◀️ Назад', 'main_menu'),
+      text: ctx.t('intake.empty'),
+      keyboard: new InlineKeyboard().text(ctx.t('common.back'), 'main_menu'),
     };
   }
 
@@ -48,16 +48,16 @@ async function buildTodayView(userId, timezone) {
     byTime[time].push(log);
   }
 
-  let text = '💊 *Приём на сегодня*\n\n';
+  let text = ctx.t('intake.title');
   const keyboard = new InlineKeyboard();
   const times = Object.keys(byTime).sort();
 
   for (const time of times) {
-    text += `🕐 *${time}*\n`;
+    text += ctx.t('intake.time_header', { time });
     for (const log of byTime[time]) {
-      const name = log.medicines?.name || 'Неизвестно';
+      const name = log.medicines?.name || ctx.t('intake.unknown_medicine');
       const dose = log.schedules?.dose_per_intake || 1;
-      const unit = log.medicines?.quantity_unit || 'шт';
+      const unit = log.medicines?.quantity_unit || ctx.t('intake.default_unit');
       const emoji = statusEmoji(log.status);
 
       text += `  ${emoji} ${name} — ${dose} ${unit}`;
@@ -81,11 +81,11 @@ async function buildTodayView(userId, timezone) {
   const skipped = logs.filter(l => l.status === 'skipped').length;
   const pending = logs.filter(l => l.status === 'pending' || l.status === 'snoozed').length;
 
-  text += `📊 Итого: ${taken}/${total} принято`;
-  if (skipped > 0) text += `, ${skipped} пропущено`;
-  if (pending > 0) text += `, ${pending} ожидает`;
+  text += ctx.t('intake.summary', { taken, total });
+  if (skipped > 0) text += ctx.t('intake.summary_skipped', { count: skipped });
+  if (pending > 0) text += ctx.t('intake.summary_pending', { count: pending });
 
-  keyboard.text('◀️ Назад', 'main_menu');
+  keyboard.text(ctx.t('common.back'), 'main_menu');
 
   return { text, keyboard };
 }
@@ -98,7 +98,7 @@ export function registerIntakeHandlers(bot) {
   bot.callbackQuery('intake_today', async (ctx) => {
     await ctx.answerCallbackQuery();
     const timezone = ctx.dbUser.timezone || 'Europe/Moscow';
-    const { text, keyboard } = await buildTodayView(ctx.dbUser.id, timezone);
+    const { text, keyboard } = await buildTodayView(ctx, ctx.dbUser.id, timezone);
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
       reply_markup: keyboard,
@@ -122,16 +122,16 @@ export function registerIntakeHandlers(bot) {
         }
       }
 
-      await ctx.answerCallbackQuery('✅ Приём отмечен');
+      await ctx.answerCallbackQuery(ctx.t('intake.taken_toast'));
     } catch (e) {
       console.error('Error marking intake taken:', e);
-      await ctx.answerCallbackQuery('Ошибка при отметке приёма');
+      await ctx.answerCallbackQuery(ctx.t('intake.taken_error'));
       return;
     }
 
     // Re-render today view
     const timezone = ctx.dbUser.timezone || 'Europe/Moscow';
-    const { text, keyboard } = await buildTodayView(ctx.dbUser.id, timezone);
+    const { text, keyboard } = await buildTodayView(ctx, ctx.dbUser.id, timezone);
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
       reply_markup: keyboard,
@@ -143,16 +143,16 @@ export function registerIntakeHandlers(bot) {
     const logId = ctx.match[1];
     try {
       await markIntakeSkipped(logId);
-      await ctx.answerCallbackQuery('❌ Приём пропущен');
+      await ctx.answerCallbackQuery(ctx.t('intake.skipped_toast'));
     } catch (e) {
       console.error('Error marking intake skipped:', e);
-      await ctx.answerCallbackQuery('Ошибка');
+      await ctx.answerCallbackQuery(ctx.t('intake.skipped_error'));
       return;
     }
 
     // Re-render today view
     const timezone = ctx.dbUser.timezone || 'Europe/Moscow';
-    const { text, keyboard } = await buildTodayView(ctx.dbUser.id, timezone);
+    const { text, keyboard } = await buildTodayView(ctx, ctx.dbUser.id, timezone);
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
       reply_markup: keyboard,
@@ -178,9 +178,9 @@ export function registerIntakeHandlers(bot) {
     );
 
     await ctx.editMessageText(
-      '📝 Введите заметку к приёму:',
+      ctx.t('intake.note_prompt'),
       {
-        reply_markup: new InlineKeyboard().text('❌ Отмена', 'intake_today'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'intake_today'),
       }
     );
   });
@@ -191,16 +191,16 @@ export function registerIntakeHandlers(bot) {
     try {
       const { snoozeIntake } = await import('../db/queries/intakeLogs.js');
       await snoozeIntake(logId);
-      await ctx.answerCallbackQuery('⏰ Отложено на 15 мин');
+      await ctx.answerCallbackQuery(ctx.t('intake.snoozed_toast'));
 
       // Update the reminder message
       await ctx.editMessageText(
-        ctx.callbackQuery.message.text + '\n\n⏰ _Отложено_',
+        ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.snoozed_label'),
         { parse_mode: 'Markdown' }
       );
     } catch (e) {
       console.error('Error snoozing intake:', e);
-      await ctx.answerCallbackQuery('Ошибка');
+      await ctx.answerCallbackQuery(ctx.t('intake.skipped_error'));
     }
   });
 
@@ -221,14 +221,14 @@ export function registerIntakeHandlers(bot) {
         }
       }
 
-      await ctx.answerCallbackQuery('✅ Приём отмечен');
+      await ctx.answerCallbackQuery(ctx.t('intake.taken_toast'));
       await ctx.editMessageText(
-        ctx.callbackQuery.message.text + '\n\n✅ _Принято_',
+        ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.taken_label'),
         { parse_mode: 'Markdown' }
       );
     } catch (e) {
       console.error('Error marking intake taken from reminder:', e);
-      await ctx.answerCallbackQuery('Ошибка');
+      await ctx.answerCallbackQuery(ctx.t('intake.skipped_error'));
     }
   });
 
@@ -237,14 +237,14 @@ export function registerIntakeHandlers(bot) {
     const logId = ctx.match[1];
     try {
       await markIntakeSkipped(logId);
-      await ctx.answerCallbackQuery('❌ Пропущено');
+      await ctx.answerCallbackQuery(ctx.t('intake.skipped_toast'));
       await ctx.editMessageText(
-        ctx.callbackQuery.message.text + '\n\n❌ _Пропущено_',
+        ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.skipped_label'),
         { parse_mode: 'Markdown' }
       );
     } catch (e) {
       console.error('Error skipping intake from reminder:', e);
-      await ctx.answerCallbackQuery('Ошибка');
+      await ctx.answerCallbackQuery(ctx.t('intake.skipped_error'));
     }
   });
 }

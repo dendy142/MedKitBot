@@ -1,5 +1,6 @@
 import { supabase } from '../db/supabase.js';
 import { DEFAULT_SETTINGS } from '../config.js';
+import { createT } from '../locales/index.js';
 
 /**
  * Middleware: ensures user exists in DB, attaches user data to ctx.dbUser
@@ -59,6 +60,7 @@ export function authMiddleware() {
     }
 
     ctx.dbUser = user;
+    ctx.t = createT(user.language || 'ru');
     return next();
   };
 }

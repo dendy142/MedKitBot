@@ -12,7 +12,7 @@ import { supabase } from '../db/supabase.js';
 async function showMedicineCard(ctx, medicineId) {
   const med = await getMedicine(medicineId);
   if (!med) {
-    if (ctx.callbackQuery) await ctx.answerCallbackQuery('Лекарство не найдено');
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery(ctx.t('medicine.not_found'));
     return;
   }
 
@@ -28,39 +28,38 @@ async function showMedicineCard(ctx, medicineId) {
   }
   if (med.category || (med.tags && med.tags.length > 0)) text += '\n';
 
-  text += `📅 Срок: ${formatExpiry(med.expiry_date, dateFormat)}\n`;
+  text += `${ctx.t('medicine.label_expiry', { value: formatExpiry(med.expiry_date, dateFormat) })}\n`;
 
   // Quantity with progress
-  const qty = formatQuantity(med.quantity, med.quantity_unit);
   if (med.initial_quantity > 0) {
     const percent = Math.round((med.quantity / med.initial_quantity) * 100);
-    text += `📏 Остаток: ${med.quantity}/${med.initial_quantity} ${med.quantity_unit} (${percent}%)\n`;
+    text += `📏 ${ctx.t('medicine.label_quantity', { value: `${med.quantity}/${med.initial_quantity} ${med.quantity_unit} (${percent}%)` })}\n`;
   } else {
-    text += `📏 Остаток: ${qty}\n`;
+    text += `${ctx.t('medicine.label_quantity', { value: formatQuantity(med.quantity, med.quantity_unit) })}\n`;
   }
 
-  if (med.notes) text += `📝 ${med.notes}\n`;
+  if (med.notes) text += `${ctx.t('medicine.label_notes', { value: med.notes })}\n`;
 
-  text += `\n${med.is_favorite ? '⭐ В избранном' : ''}`;
+  text += `\n${med.is_favorite ? ctx.t('medicine.label_favorite') : ''}`;
 
   // Keyboard
   const keyboard = new InlineKeyboard();
-  keyboard.text('✏️ Ред.', `med:${med.id}:edit`);
-  keyboard.text('➕ Пополнить', `med:${med.id}:restock`);
+  keyboard.text(ctx.t('medicine.btn_edit'), `med:${med.id}:edit`);
+  keyboard.text(ctx.t('medicine.btn_restock'), `med:${med.id}:restock`);
   keyboard.row();
-  keyboard.text('📆 Приём', `med:${med.id}:schedule`);
-  keyboard.text('📂 Копир.', `med:${med.id}:copymove`);
+  keyboard.text(ctx.t('medicine.btn_schedule'), `med:${med.id}:schedule`);
+  keyboard.text(ctx.t('medicine.btn_copy'), `med:${med.id}:copymove`);
   keyboard.text(med.is_favorite ? '⭐' : '☆', `med:${med.id}:fav`);
   keyboard.row();
   if (med.photo_file_ids && med.photo_file_ids.length > 0) {
-    keyboard.text(`📷 Фото (${med.photo_file_ids.length})`, `med:${med.id}:photos`);
+    keyboard.text(ctx.t('medicine.btn_photos', { count: med.photo_file_ids.length }), `med:${med.id}:photos`);
   }
-  keyboard.text('📋 История', `med:${med.id}:history`);
+  keyboard.text(ctx.t('medicine.btn_history'), `med:${med.id}:history`);
   keyboard.row();
-  keyboard.text('🛒 В покупки', `med:${med.id}:shop`);
-  keyboard.text('🗑 В архив', `med:${med.id}:archive`);
+  keyboard.text(ctx.t('medicine.btn_shop'), `med:${med.id}:shop`);
+  keyboard.text(ctx.t('medicine.btn_archive'), `med:${med.id}:archive`);
   keyboard.row();
-  keyboard.text('◀️ Назад', `medkit:${med.medkit_id}`);
+  keyboard.text(ctx.t('common.back'), `medkit:${med.medkit_id}`);
 
   if (ctx.callbackQuery) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -82,19 +81,6 @@ function formatDateTime(dateStr) {
   const minutes = String(d.getMinutes()).padStart(2, '0');
   return `${day}.${month}.${year} ${hours}:${minutes}`;
 }
-
-/**
- * Field name mapping for history display
- */
-const FIELD_LABELS = {
-  name: 'Название',
-  dosage: 'Дозировка',
-  category: 'Категория',
-  quantity: 'Количество',
-  notes: 'Заметки',
-  tags: 'Теги',
-  expiry_date: 'Срок годности',
-};
 
 /**
  * Register all medicine-related callback handlers
@@ -120,11 +106,11 @@ export function registerMedicineHandlers(bot) {
     if (!med) return;
 
     await ctx.editMessageText(
-      `🗑 Переместить «${med.name}» в архив?`,
+      ctx.t('medicine.archive_confirm', { name: med.name }),
       {
         reply_markup: new InlineKeyboard()
-          .text('✅ Да', `med:${ctx.match[1]}:archive:confirm`)
-          .text('❌ Нет', `med:${ctx.match[1]}`),
+          .text(ctx.t('common.yes'), `med:${ctx.match[1]}:archive:confirm`)
+          .text(ctx.t('common.no'), `med:${ctx.match[1]}`),
       }
     );
   });
@@ -134,11 +120,11 @@ export function registerMedicineHandlers(bot) {
     const med = await getMedicine(ctx.match[1]);
     await archiveMedicine(ctx.match[1]);
     await logAction(ctx.dbUser.id, 'archive', 'medicine', ctx.match[1]);
-    await ctx.answerCallbackQuery('Перемещено в архив');
+    await ctx.answerCallbackQuery(ctx.t('medicine.archive_toast'));
     // Go back to medkit
     if (med) {
-      await ctx.editMessageText('✅ Лекарство перемещено в архив.', {
-        reply_markup: new InlineKeyboard().text('◀️ К аптечке', `medkit:${med.medkit_id}`),
+      await ctx.editMessageText(ctx.t('medicine.archive_done'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${med.medkit_id}`),
       });
     }
   });
@@ -153,10 +139,10 @@ export function registerMedicineHandlers(bot) {
     const med = await getMedicine(ctx.match[1]);
     if (!med) return;
     await ctx.editMessageText(
-      `➕ *Пополнение: ${med.name}*\n\nТекущий остаток: ${formatQuantity(med.quantity, med.quantity_unit)}\n\nВведите количество для добавления:`,
+      ctx.t('medicine.restock_prompt', { name: med.name, quantity: formatQuantity(med.quantity, med.quantity_unit) }),
       {
         parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard().text('❌ Отмена', `med:${ctx.match[1]}`),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), `med:${ctx.match[1]}`),
       }
     );
   });
@@ -168,22 +154,22 @@ export function registerMedicineHandlers(bot) {
     if (!med) return;
 
     await ctx.editMessageText(
-      `✏️ *Редактирование: ${med.name}*\n\nЧто изменить?`,
+      ctx.t('medicine.edit_title', { name: med.name }),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('Название', `med:${med.id}:edit:name`)
-          .text('Дозировка', `med:${med.id}:edit:dosage`)
+          .text(ctx.t('medicine.field_name'), `med:${med.id}:edit:name`)
+          .text(ctx.t('medicine.field_dosage'), `med:${med.id}:edit:dosage`)
           .row()
-          .text('Категория', `med:${med.id}:edit:category`)
-          .text('Срок годн.', `med:${med.id}:edit:expiry`)
+          .text(ctx.t('medicine.field_category'), `med:${med.id}:edit:category`)
+          .text(ctx.t('medicine.field_expiry'), `med:${med.id}:edit:expiry`)
           .row()
-          .text('Количество', `med:${med.id}:edit:quantity`)
-          .text('Заметки', `med:${med.id}:edit:notes`)
+          .text(ctx.t('medicine.field_quantity'), `med:${med.id}:edit:quantity`)
+          .text(ctx.t('medicine.field_notes'), `med:${med.id}:edit:notes`)
           .row()
-          .text('Теги', `med:${med.id}:edit:tags`)
+          .text(ctx.t('medicine.field_tags'), `med:${med.id}:edit:tags`)
           .row()
-          .text('◀️ Назад', `med:${med.id}`),
+          .text(ctx.t('common.back'), `med:${med.id}`),
       }
     );
   });
@@ -198,20 +184,12 @@ export function registerMedicineHandlers(bot) {
       { onConflict: 'key' }
     );
 
-    const fieldLabels = {
-      name: 'название',
-      dosage: 'дозировку',
-      category: 'категорию',
-      expiry: 'срок годности (ДД.ММ.ГГГГ или ММ.ГГГГ)',
-      quantity: 'количество',
-      notes: 'заметки',
-      tags: 'теги (через запятую)',
-    };
+    const fieldLabel = ctx.t(`medicine.field_acc_${field}`) || field;
 
     await ctx.editMessageText(
-      `✏️ Введите новое значение для поля «${fieldLabels[field] || field}»:`,
+      ctx.t('medicine.edit_prompt', { field: fieldLabel }),
       {
-        reply_markup: new InlineKeyboard().text('❌ Отмена', `med:${medId}:edit`),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), `med:${medId}:edit`),
       }
     );
   });
@@ -225,8 +203,8 @@ export function registerMedicineHandlers(bot) {
     for (const fileId of med.photo_file_ids) {
       await ctx.replyWithPhoto(fileId);
     }
-    await ctx.reply('📷 Все фото:', {
-      reply_markup: new InlineKeyboard().text('◀️ Назад', `med:${med.id}`),
+    await ctx.reply(ctx.t('medicine.photos_title'), {
+      reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `med:${med.id}`),
     });
   });
 
@@ -239,25 +217,25 @@ export function registerMedicineHandlers(bot) {
 
     const history = await getMedicineHistory(medId);
 
-    let text = `📋 *История: ${med.name}*\n\n`;
+    let text = ctx.t('medicine.history_title', { name: med.name });
 
     if (history.length === 0) {
-      text += '_Нет записей об изменениях._\n';
+      text += ctx.t('medicine.history_empty');
     } else {
       for (const entry of history) {
         const dateStr = formatDateTime(entry.changed_at);
-        const username = entry.users?.username ? `@${entry.users.username}` : (entry.users?.first_name || 'Пользователь');
+        const username = entry.users?.username ? `@${entry.users.username}` : (entry.users?.first_name || ctx.t('medicine.history_user'));
         text += `${dateStr} — ${username}\n`;
 
-        const fieldLabel = FIELD_LABELS[entry.field_name] || entry.field_name;
-        const oldVal = entry.old_value === null || entry.old_value === '' ? '(пусто)' : `«${entry.old_value}»`;
-        const newVal = entry.new_value === null || entry.new_value === '' ? '(пусто)' : `«${entry.new_value}»`;
+        const fieldLabel = ctx.t(`medicine.field_${entry.field_name}`) || entry.field_name;
+        const oldVal = entry.old_value === null || entry.old_value === '' ? ctx.t('medicine.history_empty_value') : `«${entry.old_value}»`;
+        const newVal = entry.new_value === null || entry.new_value === '' ? ctx.t('medicine.history_empty_value') : `«${entry.new_value}»`;
         text += `  ${fieldLabel}: ${oldVal} → ${newVal}\n\n`;
       }
     }
 
     const keyboard = new InlineKeyboard()
-      .text('◀️ Назад', `med:${medId}`);
+      .text(ctx.t('common.back'), `med:${medId}`);
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
@@ -268,13 +246,13 @@ export function registerMedicineHandlers(bot) {
     const medId = ctx.match[1];
 
     const keyboard = new InlineKeyboard()
-      .text('📋 Копировать', `med:${medId}:copy`)
-      .text('📦 Переместить', `med:${medId}:move`)
+      .text(ctx.t('medicine.btn_copy_action'), `med:${medId}:copy`)
+      .text(ctx.t('medicine.btn_move_action'), `med:${medId}:move`)
       .row()
-      .text('◀️ Назад', `med:${medId}`);
+      .text(ctx.t('common.back'), `med:${medId}`);
 
     await ctx.editMessageText(
-      '📂 *Копирование / Перемещение*\n\nВыберите действие:',
+      ctx.t('medicine.copymove_title'),
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
@@ -291,8 +269,8 @@ export function registerMedicineHandlers(bot) {
 
     if (otherMedkits.length === 0) {
       await ctx.editMessageText(
-        '📋 Нет других аптечек для копирования.\n\nСоздайте ещё одну аптечку.',
-        { reply_markup: new InlineKeyboard().text('◀️ Назад', `med:${medId}:copymove`) }
+        ctx.t('medicine.copy_no_medkits'),
+        { reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `med:${medId}:copymove`) }
       );
       return;
     }
@@ -301,10 +279,10 @@ export function registerMedicineHandlers(bot) {
     for (const mk of otherMedkits) {
       keyboard.text(mk.name, `med:${medId}:copy:${mk.id}`).row();
     }
-    keyboard.text('◀️ Назад', `med:${medId}:copymove`);
+    keyboard.text(ctx.t('common.back'), `med:${medId}:copymove`);
 
     await ctx.editMessageText(
-      `📋 *Копировать «${med.name}»*\n\nВыберите аптечку:`,
+      ctx.t('medicine.copy_title', { name: med.name }),
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
@@ -334,11 +312,11 @@ export function registerMedicineHandlers(bot) {
     });
 
     await ctx.editMessageText(
-      `✅ «${med.name}» скопировано в аптечку «${targetMedkit.name}».`,
+      ctx.t('medicine.copy_done', { name: med.name, target: targetMedkit.name }),
       {
         reply_markup: new InlineKeyboard()
-          .text('◀️ К лекарству', `med:${medId}`)
-          .text('📦 К аптечке', `medkit:${targetMedkitId}`),
+          .text(ctx.t('medicine.btn_to_medicine'), `med:${medId}`)
+          .text(ctx.t('medkit.btn_to_medkit'), `medkit:${targetMedkitId}`),
       }
     );
   });
@@ -355,8 +333,8 @@ export function registerMedicineHandlers(bot) {
 
     if (otherMedkits.length === 0) {
       await ctx.editMessageText(
-        '📦 Нет других аптечек для перемещения.\n\nСоздайте ещё одну аптечку.',
-        { reply_markup: new InlineKeyboard().text('◀️ Назад', `med:${medId}:copymove`) }
+        ctx.t('medicine.move_no_medkits'),
+        { reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `med:${medId}:copymove`) }
       );
       return;
     }
@@ -365,10 +343,10 @@ export function registerMedicineHandlers(bot) {
     for (const mk of otherMedkits) {
       keyboard.text(mk.name, `med:${medId}:move:${mk.id}`).row();
     }
-    keyboard.text('◀️ Назад', `med:${medId}:copymove`);
+    keyboard.text(ctx.t('common.back'), `med:${medId}:copymove`);
 
     await ctx.editMessageText(
-      `📦 *Переместить «${med.name}»*\n\nВыберите аптечку:`,
+      ctx.t('medicine.move_title', { name: med.name }),
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
@@ -388,11 +366,11 @@ export function registerMedicineHandlers(bot) {
     await updateMedicine(medId, { medkit_id: targetMedkitId });
 
     await ctx.editMessageText(
-      `✅ «${med.name}» перемещено в аптечку «${targetMedkit.name}».`,
+      ctx.t('medicine.move_done', { name: med.name, target: targetMedkit.name }),
       {
         reply_markup: new InlineKeyboard()
-          .text('◀️ К лекарству', `med:${medId}`)
-          .text('📦 К аптечке', `medkit:${targetMedkitId}`),
+          .text(ctx.t('medicine.btn_to_medicine'), `med:${medId}`)
+          .text(ctx.t('medkit.btn_to_medkit'), `medkit:${targetMedkitId}`),
       }
     );
   });
@@ -403,13 +381,13 @@ export function registerMedicineHandlers(bot) {
     const archived = await getArchivedMedicines(ctx.match[1]);
 
     if (archived.length === 0) {
-      await ctx.editMessageText('📂 Архив пуст.', {
-        reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${ctx.match[1]}`),
+      await ctx.editMessageText(ctx.t('medicine.archive_empty'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `medkit:${ctx.match[1]}`),
       });
       return;
     }
 
-    let text = '📂 *Архив*\n\n';
+    let text = ctx.t('medicine.archive_title');
     const keyboard = new InlineKeyboard();
 
     for (const med of archived) {
@@ -420,7 +398,7 @@ export function registerMedicineHandlers(bot) {
         .row();
     }
 
-    keyboard.text('◀️ Назад', `medkit:${ctx.match[1]}`);
+    keyboard.text(ctx.t('common.back'), `medkit:${ctx.match[1]}`);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -432,11 +410,11 @@ export function registerMedicineHandlers(bot) {
     if (!med) return;
 
     await ctx.editMessageText(
-      `🗑 Удалить навсегда «${med.name}»? Это действие нельзя отменить.`,
+      ctx.t('medicine.delete_confirm', { name: med.name }),
       {
         reply_markup: new InlineKeyboard()
-          .text('✅ Да, удалить', `med:${medId}:permdelete:confirm`)
-          .text('❌ Нет', `medkit:${med.medkit_id}:archive`),
+          .text(ctx.t('common.yes_delete'), `med:${medId}:permdelete:confirm`)
+          .text(ctx.t('common.no'), `medkit:${med.medkit_id}:archive`),
       }
     );
   });
@@ -448,11 +426,11 @@ export function registerMedicineHandlers(bot) {
 
     await supabase.from('medicines').delete().eq('id', medId);
     await logAction(ctx.dbUser.id, 'permanent_delete', 'medicine', medId);
-    await ctx.answerCallbackQuery('Лекарство удалено навсегда');
+    await ctx.answerCallbackQuery(ctx.t('medicine.delete_toast'));
 
     if (med) {
-      await ctx.editMessageText('✅ Лекарство удалено навсегда.', {
-        reply_markup: new InlineKeyboard().text('◀️ К архиву', `medkit:${med.medkit_id}:archive`),
+      await ctx.editMessageText(ctx.t('medicine.delete_done'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('medicine.btn_to_archive'), `medkit:${med.medkit_id}:archive`),
       });
     }
   });
@@ -462,10 +440,10 @@ export function registerMedicineHandlers(bot) {
     const med = await getMedicine(ctx.match[1]);
     await restoreMedicine(ctx.match[1]);
     await logAction(ctx.dbUser.id, 'restore', 'medicine', ctx.match[1]);
-    await ctx.answerCallbackQuery('Лекарство восстановлено');
+    await ctx.answerCallbackQuery(ctx.t('medicine.restore_toast'));
     if (med) {
-      await ctx.editMessageText('✅ Лекарство восстановлено из архива.', {
-        reply_markup: new InlineKeyboard().text('◀️ К аптечке', `medkit:${med.medkit_id}`),
+      await ctx.editMessageText(ctx.t('medicine.restore_done'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${med.medkit_id}`),
       });
     }
   });

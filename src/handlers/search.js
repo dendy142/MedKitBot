@@ -8,10 +8,10 @@ import { formatQuantity, medicineStatusEmoji } from '../utils/format.js';
 export async function handleSearchCallback(ctx) {
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    '🔍 *Поиск лекарства*\n\nВведите название лекарства:',
+    ctx.t('search.prompt'),
     {
       parse_mode: 'Markdown',
-      reply_markup: new InlineKeyboard().text('◀️ Назад', 'main_menu'),
+      reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'main_menu'),
     }
   );
 }
@@ -27,13 +27,13 @@ export async function handleSearch(ctx) {
 
   if (results.length === 0) {
     const keyboard = new InlineKeyboard()
-      .text('📦 Аптечки', 'medkits')
-      .text('🔍 Искать ещё', 'search')
+      .text(ctx.t('menu.btn_medkits'), 'medkits')
+      .text(ctx.t('search.btn_search_again'), 'search')
       .row()
-      .text('◀️ Главное меню', 'main_menu');
+      .text(ctx.t('common.main_menu'), 'main_menu');
 
     await ctx.reply(
-      `🔍 По запросу «${query}» ничего не найдено.\n\nПопробуйте другое название или перейдите в аптечку.`,
+      ctx.t('search.no_results', { query }),
       { reply_markup: keyboard }
     );
     return;
@@ -42,16 +42,16 @@ export async function handleSearch(ctx) {
   // Group by medkit
   const grouped = {};
   for (const med of results) {
-    const medkitName = med.medkits?.name || 'Без аптечки';
+    const medkitName = med.medkits?.name || ctx.t('common.not_found');
     if (!grouped[medkitName]) grouped[medkitName] = [];
     grouped[medkitName].push(med);
   }
 
-  let text = `🔍 Результаты по «${query}»:\n\n`;
+  let text = ctx.t('search.results_title', { query });
   const keyboard = new InlineKeyboard();
 
   for (const [medkitName, meds] of Object.entries(grouped)) {
-    text += `📦 *${medkitName}*\n`;
+    text += ctx.t('search.medkit_header', { name: medkitName });
     for (const med of meds) {
       const emoji = medicineStatusEmoji(med);
       const qty = formatQuantity(med.quantity, med.quantity_unit);
@@ -61,8 +61,8 @@ export async function handleSearch(ctx) {
     text += '\n';
   }
 
-  keyboard.text('🔍 Искать ещё', 'search').row();
-  keyboard.text('◀️ Главное меню', 'main_menu');
+  keyboard.text(ctx.t('search.btn_search_again'), 'search').row();
+  keyboard.text(ctx.t('common.main_menu'), 'main_menu');
 
   await ctx.reply(text, {
     parse_mode: 'Markdown',

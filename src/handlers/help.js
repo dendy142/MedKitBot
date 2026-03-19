@@ -1,72 +1,28 @@
 import { InlineKeyboard } from 'grammy';
 
-const HELP_TEXT = `📖 *Помощь — Medkit Bot*
-
-Я помогу управлять вашими домашними аптечками!
-
-*📦 Аптечки*
-Создавайте несколько аптечек (Домашняя, Дачная, В дорогу) и управляйте ими.
-Делитесь аптечками с семьёй — каждый участник видит содержимое.
-
-*💊 Лекарства*
-Добавляйте лекарства с дозировкой, категорией, сроком годности, количеством.
-Прикрепляйте до 5 фото и заметки.
-Помечайте избранные ⭐ — они всегда вверху.
-Копируйте и перемещайте между аптечками.
-
-*📆 Приём и расписание*
-Настройте курсы приёма: точное время или период дня.
-Бот напомнит о приёме и автоматически спишет остаток.
-Отслеживайте стрики и статистику соблюдения.
-
-*👥 Общие аптечки*
-Поделитесь аптечкой по ссылке или @username.
-Роли: владелец, редактор, только просмотр.
-
-*🛒 Список покупок*
-Добавляйте лекарства в список покупок.
-Отмечайте купленное и пополняйте остаток.
-Делитесь списком текстом для пересылки.
-
-*🔍 Поиск*
-Быстрый поиск по названию среди всех аптечек.
-Просто напишите название — бот попробует найти.
-
-*📊 Статистика*
-Отслеживайте соблюдение курсов, стрики и историю.
-Периоды: сегодня, неделя, месяц, всё время.
-
-*📤 Экспорт / 📥 Импорт*
-Экспортируйте данные в CSV.
-Импортируйте лекарства из CSV-файла.
-
-*⚙️ Настройки*
-Часовой пояс, периоды дня, уведомления, пороги, дайджест, отображение.
-
-*Команды:*
-/start — Главное меню
-/help — Эта справка
-/cancel — Отмена текущего действия`;
-
-const HELP_KEYBOARD = new InlineKeyboard()
-  .text('📦 Аптечки', 'medkits')
-  .text('💊 Приём', 'intake_today')
-  .row()
-  .text('🛒 Покупки', 'shopping')
-  .text('📊 Статистика', 'stats')
-  .row()
-  .text('◀️ Главное меню', 'main_menu');
+function buildHelpKeyboard(ctx) {
+  return new InlineKeyboard()
+    .text(ctx.t('help.btn_medkits'), 'medkits')
+    .text(ctx.t('help.btn_intake'), 'intake_today')
+    .row()
+    .text(ctx.t('help.btn_shopping'), 'shopping')
+    .text(ctx.t('help.btn_stats'), 'stats')
+    .row()
+    .text(ctx.t('common.main_menu'), 'main_menu');
+}
 
 export async function handleHelp(ctx) {
+  const text = ctx.t('help.text');
+  const keyboard = buildHelpKeyboard(ctx);
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(HELP_TEXT, {
+    await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
-      reply_markup: HELP_KEYBOARD,
+      reply_markup: keyboard,
     });
   } else {
-    await ctx.reply(HELP_TEXT, {
+    await ctx.reply(text, {
       parse_mode: 'Markdown',
-      reply_markup: HELP_KEYBOARD,
+      reply_markup: keyboard,
     });
   }
 }

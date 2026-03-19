@@ -89,6 +89,61 @@ export function formatExpiry(expiryDate, dateFormat) {
 }
 
 /**
+ * Build a breadcrumb string: "🏠 Аптечка › Лекарство"
+ */
+export function breadcrumb(...parts) {
+  return parts.filter(Boolean).join(' › ');
+}
+
+/**
+ * Russian pluralization.
+ * pluralize(5, 'таблетка', 'таблетки', 'таблеток') → 'таблеток'
+ */
+export function pluralize(n, one, few, many) {
+  const abs = Math.abs(n);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod100 >= 11 && mod100 <= 19) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+/**
+ * Relative date string: "сегодня", "вчера", "3 дня назад", "через 5 дней"
+ */
+export function relativeDate(date) {
+  if (!date) return '—';
+  const days = daysUntil(date);
+  if (days === 0) return 'сегодня';
+  if (days === 1) return 'завтра';
+  if (days === -1) return 'вчера';
+  if (days > 1) return `через ${days} ${pluralize(days, 'день', 'дня', 'дней')}`;
+  const absDays = Math.abs(days);
+  return `${absDays} ${pluralize(absDays, 'день', 'дня', 'дней')} назад`;
+}
+
+/**
+ * Truncate string with ellipsis
+ */
+export function truncate(str, maxLen = 30) {
+  if (!str || str.length <= maxLen) return str || '';
+  return str.slice(0, maxLen - 1) + '…';
+}
+
+/**
+ * Progress bar: ████░░░░░░ 40%
+ */
+export function progressBar(current, total, width = 10) {
+  if (!total || total <= 0) return '';
+  const ratio = Math.min(current / total, 1);
+  const filled = Math.round(ratio * width);
+  const empty = width - filled;
+  const percent = Math.round(ratio * 100);
+  return '█'.repeat(filled) + '░'.repeat(empty) + ` ${percent}%`;
+}
+
+/**
  * Parse date from user input (supports MM.YYYY and DD.MM.YYYY)
  * Returns Date or null
  */

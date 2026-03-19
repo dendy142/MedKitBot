@@ -2,6 +2,8 @@ import { supabase } from '../../src/db/supabase.js';
 import { Bot } from 'grammy';
 import { BOT_TOKEN, CRON_SECRET } from '../../src/config.js';
 import { InlineKeyboard } from 'grammy';
+import { t } from '../../src/locales/index.js';
+import { pluralize } from '../../src/utils/format.js';
 
 export default async function handler(req, res) {
   // Verify cron secret
@@ -30,6 +32,7 @@ export default async function handler(req, res) {
         const settings = user.settings;
         if (!settings?.digest?.enabled) continue;
 
+        const lang = settings.language || 'ru';
         const timezone = user.timezone || 'Etc/GMT-3';
         const digestTime = settings.digest.time || '08:00';
 
@@ -37,7 +40,6 @@ export default async function handler(req, res) {
         const userNow = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
         const currentHour = String(userNow.getHours()).padStart(2, '0');
         const currentMinute = String(userNow.getMinutes()).padStart(2, '0');
-        const currentTime = `${currentHour}:${currentMinute}`;
 
         // Allow 30-minute window for cron execution
         const [digestH, digestM] = digestTime.split(':').map(Number);
@@ -74,7 +76,7 @@ export default async function handler(req, res) {
             .gte('planned_at', startOfDay)
             .lte('planned_at', endOfDay);
           if (intakeCount > 0) {
-            parts.push(`💊 Приёмов на сегодня: ${intakeCount}`);
+            parts.push(t('cron.digest_intakes', lang, { count: intakeCount }));
           }
         }
 
@@ -98,7 +100,8 @@ export default async function handler(req, res) {
               .not('expiry_date', 'is', null)
               .lte('expiry_date', thresholdDate.toISOString().split('T')[0]);
             if (expiryCount > 0) {
-              parts.push(`⚠️ Истекает срок: ${expiryCount} ${getMedWord(expiryCount)}`);
+              const word = pluralize(expiryCount, t('cron.med_1', lang), t('cron.med_2', lang), t('cron.med_5', lang));
+              parts.push(t('cron.digest_expiring', lang, { count: expiryCount, word }));
             }
           }
         }
@@ -120,7 +123,8 @@ export default async function handler(req, res) {
               .lte('quantity', thresholds.low_stock_count)
               .gt('quantity', 0);
             if (lowCount > 0) {
-              parts.push(`📉 Заканчивается: ${lowCount} ${getMedWord(lowCount)}`);
+              const word = pluralize(lowCount, t('cron.med_1', lang), t('cron.med_2', lang), t('cron.med_5', lang));
+              parts.push(t('cron.digest_low', lang, { count: lowCount, word }));
             }
           }
         }
@@ -133,7 +137,7 @@ export default async function handler(req, res) {
             .eq('user_id', user.id)
             .eq('is_bought', false);
           if (shopCount > 0) {
-            parts.push(`🛒 В списке покупок: ${shopCount}`);
+            parts.push(t('cron.digest_shopping', lang, { count: shopCount }));
           }
         }
 
@@ -141,12 +145,12 @@ export default async function handler(req, res) {
         if (parts.length === 0) continue;
 
         const dateStr = fmtDate(userNow);
-        let text = `📊 *Дайджест на ${dateStr}*\n\n`;
+        let text = t('cron.digest_title', lang, { date: dateStr });
         text += parts.join('\n');
 
         const keyboard = new InlineKeyboard()
-          .text('📦 Аптечки', 'medkits')
-          .text('💊 Приём', 'intake_today');
+          .text(t('menu.btn_medkits', lang), 'medkits')
+          .text(t('menu.btn_intake', lang), 'intake_today');
 
         await bot.api.sendMessage(user.telegram_id, text, {
           parse_mode: 'Markdown',
@@ -176,13 +180,4 @@ export default async function handler(req, res) {
 
 function fmtDate(d) {
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
-}
-
-function getMedWord(n) {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs >= 11 && abs <= 19) return 'лекарств';
-  if (last === 1) return 'лекарство';
-  if (last >= 2 && last <= 4) return 'лекарства';
-  return 'лекарств';
 }

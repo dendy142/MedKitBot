@@ -1,6 +1,7 @@
 import { supabase } from '../../src/db/supabase.js';
 import { Bot } from 'grammy';
 import { BOT_TOKEN, CRON_SECRET } from '../../src/config.js';
+import { t } from '../../src/locales/index.js';
 
 export default async function handler(req, res) {
   // Verify cron secret
@@ -74,12 +75,14 @@ export default async function handler(req, res) {
 
       if (!user || !user.settings?.notifications?.expiry_alerts) continue;
 
-      let text = '⚠️ *Срок годности истекает:*\n\n';
+      const lang = user.settings?.language || 'ru';
+      let text = t('cron.expiry_title', lang);
       for (const med of uniqueMeds) {
         const daysLeft = Math.ceil((new Date(med.expiry_date) - now) / (1000 * 60 * 60 * 24));
         const emoji = daysLeft <= 0 ? '❌' : '⚠️';
+        const timeLeft = daysLeft <= 0 ? t('cron.expiry_overdue', lang) : t('cron.expiry_days', lang, { count: daysLeft });
         text += `${emoji} ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n`;
-        text += `   📦 ${med.medkits?.name} | ${daysLeft <= 0 ? 'ПРОСРОЧЕНО' : `${daysLeft} дн.`}\n\n`;
+        text += `   📦 ${med.medkits?.name} | ${timeLeft}\n\n`;
       }
 
       try {

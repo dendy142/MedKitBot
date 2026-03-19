@@ -1,8 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { getIntakeLogsForPeriod } from '../db/queries/intakeLogs.js';
 import { getUserActiveSchedules } from '../db/queries/schedules.js';
-
-const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+import ru from '../locales/ru.js';
 
 /**
  * Get start of day in user timezone
@@ -51,11 +50,11 @@ function getDateRange(period, timezone) {
 /**
  * Get period label
  */
-function getPeriodLabel(period, start, end) {
-  if (period === 'today') return 'сегодня';
-  if (period === 'week') return `неделю (${fmtDDMM(start)} — ${fmtDDMM(end)})`;
-  if (period === 'month') return `месяц (${fmtDDMM(start)} — ${fmtDDMM(end)})`;
-  return 'всё время';
+function getPeriodLabel(ctx, period, start, end) {
+  if (period === 'today') return ctx.t('stats.period_today');
+  if (period === 'week') return ctx.t('stats.period_week', { start: fmtDDMM(start), end: fmtDDMM(end) });
+  if (period === 'month') return ctx.t('stats.period_month', { start: fmtDDMM(start), end: fmtDDMM(end) });
+  return ctx.t('stats.period_all');
 }
 
 /**
@@ -113,7 +112,7 @@ function buildDayVisual(logs, start, end, timezone) {
     const dateStr = current.toLocaleDateString('en-CA', { timeZone: timezone });
     const dayLogs = byDate[dateStr];
     if (dayLogs && dayLogs.length > 0) {
-      const dayName = DAY_NAMES[current.getDay()];
+      const dayName = ru.stats.day_names[current.getDay()];
       const icons = dayLogs.map(l => l.status === 'taken' ? '✅' : '❌').join('');
       parts.push(`${dayName} ${icons}`);
     }
@@ -127,15 +126,15 @@ function buildDayVisual(logs, start, end, timezone) {
  * Show stats menu
  */
 async function showStatsMenu(ctx) {
-  const text = '📊 *Статистика приёмов*\n\nВыберите период:';
+  const text = ctx.t('stats.title');
   const keyboard = new InlineKeyboard()
-    .text('Сегодня', 'stats:today')
-    .text('Неделя', 'stats:week')
+    .text(ctx.t('stats.btn_today'), 'stats:today')
+    .text(ctx.t('stats.btn_week'), 'stats:week')
     .row()
-    .text('Месяц', 'stats:month')
-    .text('Всё время', 'stats:all')
+    .text(ctx.t('stats.btn_month'), 'stats:month')
+    .text(ctx.t('stats.btn_all'), 'stats:all')
     .row()
-    .text('◀️ Назад', 'main_menu');
+    .text(ctx.t('common.back'), 'main_menu');
 
   if (ctx.callbackQuery) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -150,7 +149,7 @@ async function showStatsMenu(ctx) {
 async function showStatsForPeriod(ctx, period) {
   const timezone = ctx.dbUser.timezone || 'Etc/GMT-3';
   const { start, end } = getDateRange(period, timezone);
-  const periodLabel = getPeriodLabel(period, start, end);
+  const periodLabel = getPeriodLabel(ctx, period, start, end);
 
   const logs = await getIntakeLogsForPeriod(
     ctx.dbUser.id,
@@ -159,9 +158,9 @@ async function showStatsForPeriod(ctx, period) {
   );
 
   if (!logs.length) {
-    const text = `📊 *Статистика за ${periodLabel}*\n\nНет данных о приёмах за этот период.`;
+    const text = ctx.t('stats.no_data', { period: periodLabel });
     const keyboard = new InlineKeyboard()
-      .text('◀️ Назад', 'stats');
+      .text(ctx.t('common.back'), 'stats');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
     return;
   }
@@ -172,7 +171,7 @@ async function showStatsForPeriod(ctx, period) {
     const medId = log.medicine_id;
     if (!byMedicine[medId]) {
       byMedicine[medId] = {
-        name: log.medicines?.name || 'Неизвестно',
+        name: log.medicines?.name || ctx.t('stats.unknown_medicine'),
         dosage: log.medicines?.dosage || '',
         logs: [],
       };
@@ -193,11 +192,11 @@ async function showStatsForPeriod(ctx, period) {
     totalTaken += taken;
 
     const label = med.dosage ? `${med.name} ${med.dosage}` : med.name;
-    let line = `💊 ${label}: ${taken}/${planned} (${pct}%)`;
+    let line = ctx.t('stats.medicine_line', { name: label, taken, planned, pct });
 
     const streak = calculateStreak(med.logs, timezone);
     if (streak > 0) {
-      line += `\n   🔥 Стрик: ${streak} ${getDaysWord(streak)} подряд`;
+      line += '\n   ' + ctx.t('stats.streak', { count: streak, days: getDaysWord(ctx, streak) });
     }
 
     // Day-by-day visual only for week period
@@ -213,26 +212,26 @@ async function showStatsForPeriod(ctx, period) {
 
   const totalPct = totalPlanned > 0 ? Math.round((totalTaken / totalPlanned) * 100) : 0;
 
-  let text = `📊 *Статистика за ${periodLabel}*\n\n`;
+  let text = ctx.t('stats.result_title', { period: periodLabel });
   text += lines.join('\n\n');
-  text += `\n\n📈 Общее: ${totalTaken}/${totalPlanned} (${totalPct}%)`;
+  text += '\n\n' + ctx.t('stats.result_total', { taken: totalTaken, planned: totalPlanned, pct: totalPct });
 
   const keyboard = new InlineKeyboard()
-    .text('◀️ Назад', 'stats');
+    .text(ctx.t('common.back'), 'stats');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
 
 /**
- * Proper Russian declension for "день"
+ * Proper Russian declension for "день" using i18n keys
  */
-function getDaysWord(n) {
+function getDaysWord(ctx, n) {
   const abs = Math.abs(n) % 100;
   const last = abs % 10;
-  if (abs >= 11 && abs <= 19) return 'дней';
-  if (last === 1) return 'день';
-  if (last >= 2 && last <= 4) return 'дня';
-  return 'дней';
+  if (abs >= 11 && abs <= 19) return ctx.t('stats.days_5');
+  if (last === 1) return ctx.t('stats.days_1');
+  if (last >= 2 && last <= 4) return ctx.t('stats.days_2');
+  return ctx.t('stats.days_5');
 }
 
 /**

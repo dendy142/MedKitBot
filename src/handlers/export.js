@@ -35,8 +35,8 @@ function formatExpiryForCsv(expiryDate) {
 /**
  * Generate CSV content from medicines array
  */
-function generateCsv(medicines) {
-  const header = 'Название;Дозировка;Категория;Срок годности;Количество;Единица;Теги;Заметки';
+function generateCsv(medicines, ctx) {
+  const header = ctx.t('export_import.csv_header');
   const rows = medicines.map((m) => {
     return [
       csvField(m.name),
@@ -59,8 +59,8 @@ async function showExportMenu(ctx) {
   const medkits = await getUserMedkits(ctx.dbUser.id);
 
   if (medkits.length === 0) {
-    const keyboard = new InlineKeyboard().text('◀️ Назад', 'settings');
-    await ctx.editMessageText('📤 У вас нет аптечек для экспорта.', {
+    const keyboard = new InlineKeyboard().text(ctx.t('common.back'), 'settings');
+    await ctx.editMessageText(ctx.t('export_import.export_no_medkits'), {
       reply_markup: keyboard,
     });
     return;
@@ -71,11 +71,11 @@ async function showExportMenu(ctx) {
     keyboard.text(`📦 ${mk.name}`, `export:${mk.id}`).row();
   }
   if (medkits.length > 1) {
-    keyboard.text('📦 Все аптечки', 'export:all').row();
+    keyboard.text(ctx.t('export_import.export_all'), 'export:all').row();
   }
-  keyboard.text('◀️ Назад', 'settings');
+  keyboard.text(ctx.t('common.back'), 'settings');
 
-  await ctx.editMessageText('📤 *Экспорт данных*\n\nВыберите что экспортировать:', {
+  await ctx.editMessageText(ctx.t('export_import.export_title'), {
     parse_mode: 'Markdown',
     reply_markup: keyboard,
   });
@@ -94,11 +94,11 @@ async function handleExportSelect(ctx, target) {
       const meds = await getMedkitMedicines(mk.id);
       allMedicines.push(...meds);
     }
-    exportName = 'все_аптечки';
+    exportName = 'all_medkits';
   } else {
     const mk = medkits.find((m) => m.id === target);
     if (!mk) {
-      await ctx.answerCallbackQuery('Аптечка не найдена');
+      await ctx.answerCallbackQuery(ctx.t('addmed.medkit_not_found'));
       return;
     }
     allMedicines = await getMedkitMedicines(target);
@@ -106,20 +106,20 @@ async function handleExportSelect(ctx, target) {
   }
 
   if (allMedicines.length === 0) {
-    await ctx.answerCallbackQuery('Нет лекарств для экспорта');
-    await ctx.editMessageText('📤 В выбранной аптечке нет лекарств.', {
-      reply_markup: new InlineKeyboard().text('◀️ Назад', 'export'),
+    await ctx.answerCallbackQuery(ctx.t('export_import.export_no_medicines'));
+    await ctx.editMessageText(ctx.t('export_import.export_empty'), {
+      reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'export'),
     });
     return;
   }
 
-  const csvContent = generateCsv(allMedicines);
+  const csvContent = generateCsv(allMedicines, ctx);
   const buffer = Buffer.from('\ufeff' + csvContent, 'utf-8');
   const inputFile = new InputFile(buffer, `${exportName}_${Date.now()}.csv`);
 
   await ctx.answerCallbackQuery();
   await ctx.replyWithDocument(inputFile, {
-    caption: `📤 Экспорт завершён — ${allMedicines.length} лекарств`,
+    caption: ctx.t('export_import.export_done', { count: allMedicines.length }),
   });
 }
 

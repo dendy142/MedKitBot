@@ -12,11 +12,11 @@ async function showShoppingList(ctx, page = 0) {
 
   if (items.length === 0) {
     const keyboard = new InlineKeyboard()
-      .text('➕ Добавить', 'shop:add')
+      .text(ctx.t('shopping.btn_add'), 'shop:add')
       .row()
-      .text('◀️ Назад', 'main_menu');
+      .text(ctx.t('common.back'), 'main_menu');
 
-    const text = '🛒 *Список покупок*\n\nСписок пуст.';
+    const text = ctx.t('shopping.empty');
     if (ctx.callbackQuery) {
       await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
     } else {
@@ -26,7 +26,7 @@ async function showShoppingList(ctx, page = 0) {
   }
 
   const pageItems = paginateItems(items, page);
-  let text = `🛒 *Список покупок* (${items.length})\n\n`;
+  let text = ctx.t('shopping.title', { count: items.length });
 
   for (const item of pageItems) {
     const medkit = item.medkits?.name ? ` (${item.medkits.name})` : '';
@@ -40,12 +40,12 @@ async function showShoppingList(ctx, page = 0) {
 
   addPagination(keyboard, page, items.length, 'shop');
   keyboard.row();
-  keyboard.text('➕ Добавить', 'shop:add');
-  keyboard.text('🗑 Очистить', 'shop:clear');
+  keyboard.text(ctx.t('shopping.btn_add'), 'shop:add');
+  keyboard.text(ctx.t('shopping.btn_clear'), 'shop:clear');
   keyboard.row();
-  keyboard.text('📤 Поделиться', 'shop:share');
+  keyboard.text(ctx.t('shopping.btn_share'), 'shop:share');
   keyboard.row();
-  keyboard.text('◀️ Назад', 'main_menu');
+  keyboard.text(ctx.t('common.back'), 'main_menu');
 
   if (ctx.callbackQuery) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -75,10 +75,10 @@ export function registerShoppingHandlers(bot) {
     await ctx.answerCallbackQuery();
     const items = await getShoppingList(ctx.dbUser.id);
     if (items.length === 0) {
-      await ctx.answerCallbackQuery('Список пуст');
+      await ctx.answerCallbackQuery(ctx.t('shopping.empty_short'));
       return;
     }
-    let text = '🛒 Список покупок:\n\n';
+    let text = ctx.t('shopping.share_header');
     for (const item of items) {
       text += `• ${item.name}\n`;
     }
@@ -88,19 +88,19 @@ export function registerShoppingHandlers(bot) {
 
   // Mark as bought
   bot.callbackQuery(/^shop:bought:([0-9a-f-]+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery('Куплено!');
+    await ctx.answerCallbackQuery(ctx.t('shopping.bought_toast'));
     const item = await markAsBought(ctx.match[1]);
     // If linked to a medicine, offer to restock
     if (item?.medicine_id) {
       const med = await getMedicine(item.medicine_id);
       if (med) {
         await ctx.editMessageText(
-          `✅ *${item.name}* — куплено!\n\nПополнить остаток в аптечке?`,
+          ctx.t('shopping.bought', { name: item.name }),
           {
             parse_mode: 'Markdown',
             reply_markup: new InlineKeyboard()
-              .text('➕ Пополнить', `med:${med.id}:restock`)
-              .text('⏭ Нет', 'shopping'),
+              .text(ctx.t('shopping.btn_restock'), `med:${med.id}:restock`)
+              .text(ctx.t('shopping.btn_no_restock'), 'shopping'),
           }
         );
         return;
@@ -117,9 +117,9 @@ export function registerShoppingHandlers(bot) {
       { onConflict: 'key' }
     );
     await ctx.editMessageText(
-      '🛒 Введите название товара для списка покупок:',
+      ctx.t('shopping.add_prompt'),
       {
-        reply_markup: new InlineKeyboard().text('❌ Отмена', 'shopping'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'shopping'),
       }
     );
   });
@@ -128,17 +128,17 @@ export function registerShoppingHandlers(bot) {
   bot.callbackQuery('shop:clear', async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
-      '🗑 Очистить весь список покупок?',
+      ctx.t('shopping.clear_confirm'),
       {
         reply_markup: new InlineKeyboard()
-          .text('✅ Да', 'shop:clear:confirm')
-          .text('❌ Нет', 'shopping'),
+          .text(ctx.t('common.yes'), 'shop:clear:confirm')
+          .text(ctx.t('common.no'), 'shopping'),
       }
     );
   });
 
   bot.callbackQuery('shop:clear:confirm', async (ctx) => {
-    await ctx.answerCallbackQuery('Список очищен');
+    await ctx.answerCallbackQuery(ctx.t('shopping.clear_toast'));
     // Delete all unbought items for user
     await supabase
       .from('shopping_list')
@@ -150,18 +150,18 @@ export function registerShoppingHandlers(bot) {
 
   // Add from medicine card
   bot.callbackQuery(/^med:([0-9a-f-]+):shop$/, async (ctx) => {
-    await ctx.answerCallbackQuery('Добавлено в список покупок');
+    await ctx.answerCallbackQuery(ctx.t('medicine.added_to_shop_toast'));
     const med = await getMedicine(ctx.match[1]);
     if (!med) return;
     await addToShoppingList(ctx.dbUser.id, med.name, med.id, med.medkit_id);
     // Stay on medicine card
     await ctx.editMessageText(
-      `✅ *${med.name}* добавлен в список покупок!`,
+      ctx.t('medicine.added_to_shop', { name: med.name }),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('🛒 К списку', 'shopping')
-          .text('◀️ Назад', `med:${med.id}`),
+          .text(ctx.t('medicine.btn_to_shop'), 'shopping')
+          .text(ctx.t('common.back'), `med:${med.id}`),
       }
     );
   });

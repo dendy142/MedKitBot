@@ -1,30 +1,30 @@
 import { InlineKeyboard } from 'grammy';
 
 /** Back button */
-export function backButton(callbackData) {
-  return InlineKeyboard.text('◀️ Назад', callbackData);
+export function backButton(callbackData, t) {
+  return InlineKeyboard.text(t ? t('common.back') : '◀️ Назад', callbackData);
 }
 
 /** Cancel button */
-export function cancelButton() {
-  return InlineKeyboard.text('❌ Отмена', 'cancel');
+export function cancelButton(t) {
+  return InlineKeyboard.text(t ? t('common.cancel') : '❌ Отмена', 'cancel');
 }
 
 /** Back + Cancel row */
-export function backCancelRow(backTo) {
+export function backCancelRow(backTo, t) {
   return new InlineKeyboard()
-    .text('◀️ Назад', backTo)
-    .text('❌ Отмена', 'cancel');
+    .text(t ? t('common.back') : '◀️ Назад', backTo)
+    .text(t ? t('common.cancel') : '❌ Отмена', 'cancel');
 }
 
 /** Yes/No confirmation */
-export function confirmKeyboard(yesData, noData) {
+export function confirmKeyboard(yesData, noData, t) {
   return new InlineKeyboard()
-    .text('✅ Да', yesData)
-    .text('❌ Нет', noData);
+    .text(t ? t('common.yes') : '✅ Да', yesData)
+    .text(t ? t('common.no') : '❌ Нет', noData);
 }
 
 /** Skip button */
-export function skipButton(callbackData = 'skip') {
-  return InlineKeyboard.text('⏭ Пропустить', callbackData);
+export function skipButton(callbackData = 'skip', t) {
+  return InlineKeyboard.text(t ? t('common.skip') : '⏭ Пропустить', callbackData);
 }

@@ -64,15 +64,9 @@ function parseCsv(text) {
  * Show import instructions
  */
 async function showImportMenu(ctx) {
-  const text =
-    '📥 *Импорт лекарств*\n\n' +
-    'Отправьте CSV-файл с лекарствами.\n\n' +
-    'Формат (разделитель — точка с запятой):\n' +
-    '`Название;Дозировка;Категория;Срок годности;Количество;Единица`\n\n' +
-    'Пример:\n' +
-    '`Парацетамол;500мг;Жаропонижающие;03.2027;30;таблетки`';
+  const text = ctx.t('export_import.import_title');
 
-  const keyboard = new InlineKeyboard().text('◀️ Назад', 'settings');
+  const keyboard = new InlineKeyboard().text(ctx.t('common.back'), 'settings');
 
   let msgId;
   if (ctx.callbackQuery) {
@@ -106,8 +100,8 @@ export async function handleImportDocument(ctx) {
       await ctx.api.editMessageText(
         ctx.chat.id,
         state.msgId,
-        '⚠️ Пожалуйста, отправьте файл в формате CSV.',
-        { reply_markup: new InlineKeyboard().text('◀️ Назад', 'settings') },
+        ctx.t('export_import.import_bad_format'),
+        { reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'settings') },
       );
     } catch { /* ignore */ }
     return true;
@@ -130,15 +124,15 @@ export async function handleImportDocument(ctx) {
       await ctx.api.editMessageText(
         ctx.chat.id,
         state.msgId,
-        '⚠️ Не удалось найти лекарства в файле. Проверьте формат.',
-        { reply_markup: new InlineKeyboard().text('◀️ Назад', 'import') },
+        ctx.t('export_import.import_no_medicines'),
+        { reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'import') },
       );
     } catch { /* ignore */ }
     return true;
   }
 
   // Build preview text
-  let preview = `📥 *Импорт: найдено ${medicines.length} лекарств*\n\n`;
+  let preview = ctx.t('export_import.import_preview', { count: medicines.length });
   const showCount = Math.min(medicines.length, 10);
   for (let i = 0; i < showCount; i++) {
     const m = medicines[i];
@@ -149,9 +143,9 @@ export async function handleImportDocument(ctx) {
     preview += parts.join(' ') + '\n';
   }
   if (medicines.length > showCount) {
-    preview += `\n_...и ещё ${medicines.length - showCount}_\n`;
+    preview += ctx.t('export_import.import_more', { count: medicines.length - showCount });
   }
-  preview += '\nВ какую аптечку импортировать?';
+  preview += ctx.t('export_import.import_choose_medkit');
 
   // Show medkit selection
   const medkits = await getUserMedkits(ctx.dbUser.id);
@@ -159,7 +153,7 @@ export async function handleImportDocument(ctx) {
   for (const mk of medkits) {
     keyboard.text(`📦 ${mk.name}`, `import:confirm:${mk.id}`).row();
   }
-  keyboard.text('❌ Отмена', 'import:cancel');
+  keyboard.text(ctx.t('common.cancel'), 'import:cancel');
 
   // Store parsed medicines in state
   await setState(ctx.dbUser.id, {
@@ -202,9 +196,9 @@ export function registerImportHandlers(bot) {
   // Cancel import
   bot.callbackQuery('import:cancel', async (ctx) => {
     await clearState(ctx.dbUser.id);
-    await ctx.answerCallbackQuery('Импорт отменён');
-    await ctx.editMessageText('❌ Импорт отменён.', {
-      reply_markup: new InlineKeyboard().text('◀️ Назад', 'settings'),
+    await ctx.answerCallbackQuery(ctx.t('export_import.import_cancelled_toast'));
+    await ctx.editMessageText(ctx.t('export_import.import_cancelled'), {
+      reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'settings'),
     });
   });
 
@@ -214,7 +208,7 @@ export function registerImportHandlers(bot) {
     const state = await getState(ctx.dbUser.id);
 
     if (!state || state.action !== 'import_select_medkit' || !state.medicines) {
-      await ctx.answerCallbackQuery('Сессия истекла. Начните заново.');
+      await ctx.answerCallbackQuery(ctx.t('export_import.import_session_expired'));
       await clearState(ctx.dbUser.id);
       return;
     }
@@ -224,8 +218,8 @@ export function registerImportHandlers(bot) {
     const medkits = await getUserMedkits(ctx.dbUser.id);
     const medkit = medkits.find((m) => m.id === medkitId);
     if (!medkit) {
-      await ctx.editMessageText('⚠️ Аптечка не найдена.', {
-        reply_markup: new InlineKeyboard().text('◀️ Назад', 'settings'),
+      await ctx.editMessageText(ctx.t('export_import.import_medkit_not_found'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'settings'),
       });
       await clearState(ctx.dbUser.id);
       return;
@@ -256,17 +250,17 @@ export function registerImportHandlers(bot) {
 
     await clearState(ctx.dbUser.id);
 
-    let resultText = `✅ Импортировано *${created}* лекарств в аптечку *«${medkit.name}»*`;
+    let resultText = ctx.t('export_import.import_done', { created, medkit: medkit.name });
     if (errors > 0) {
-      resultText += `\n⚠️ Не удалось импортировать: ${errors}`;
+      resultText += ctx.t('export_import.import_errors', { count: errors });
     }
 
     await ctx.editMessageText(resultText, {
       parse_mode: 'Markdown',
       reply_markup: new InlineKeyboard()
-        .text('📦 Открыть аптечку', `medkit:${medkitId}`)
+        .text(ctx.t('export_import.btn_open_medkit'), `medkit:${medkitId}`)
         .row()
-        .text('◀️ В меню', 'main_menu'),
+        .text(ctx.t('export_import.btn_to_menu'), 'main_menu'),
     });
   });
 }

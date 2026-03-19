@@ -1,8 +1,9 @@
 import { supabase } from '../../src/db/supabase.js';
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import { BOT_TOKEN, CRON_SECRET, MAX_SNOOZE } from '../../src/config.js';
 import { getPendingIntakeLogs, createIntakeLog } from '../../src/db/queries/intakeLogs.js';
 import { getUserActiveSchedules } from '../../src/db/queries/schedules.js';
+import { t } from '../../src/locales/index.js';
 
 /**
  * Get user's local "now" and "today" in their timezone
@@ -203,20 +204,21 @@ export default async function handler(req, res) {
       const userSettings = log.users?.settings || {};
       if (userSettings.notifications?.intake_reminders === false) continue;
 
-      const medName = log.medicines?.name || 'Лекарство';
+      const lang = userSettings.language || 'ru';
+      const medName = log.medicines?.name || t('cron.reminder_medicine', lang);
       const dose = log.schedules?.dose_per_intake || 1;
       const medNotes = log.medicines?.notes;
 
-      let text = `💊 *Напоминание о приёме*\n\n`;
+      let text = t('cron.reminder_title', lang);
       text += `${medName}${log.medicines?.dosage ? ' ' + log.medicines.dosage : ''}\n`;
-      text += `💊 Доза: ${dose}\n`;
+      text += t('cron.reminder_dose', lang, { dose, unit: '' }) + '\n';
 
-      if (medNotes) text += `📝 ${medNotes}\n`;
+      if (medNotes) text += t('cron.reminder_notes', lang, { notes: medNotes }) + '\n';
 
       const keyboard = new InlineKeyboard()
-        .text('✅ Принял', `intake:${log.id}:take_remind`)
-        .text('⏰ +15 мин', `intake:${log.id}:snooze`)
-        .text('❌ Пропуск', `intake:${log.id}:skip_remind`);
+        .text(t('cron.btn_take', lang), `intake:${log.id}:take_remind`)
+        .text(t('cron.btn_snooze', lang), `intake:${log.id}:snooze`)
+        .text(t('cron.btn_skip', lang), `intake:${log.id}:skip_remind`);
 
       try {
         await bot.api.sendMessage(log.users.telegram_id, text, {

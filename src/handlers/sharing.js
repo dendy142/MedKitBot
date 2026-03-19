@@ -3,17 +3,21 @@ import { supabase } from '../db/supabase.js';
 import { getMedkit } from '../db/queries/medkits.js';
 import { createInvitation, getInvitationByCode, acceptInvitation, getMedkitInvitations } from '../db/queries/invitations.js';
 
-const ROLE_LABELS = {
-  owner: '👑 Владелец',
-  editor: '✏️ Редактор',
-  viewer: '👁 Только просмотр',
-};
+function getRoleLabels(ctx) {
+  return {
+    owner: ctx.t('sharing.role_owner'),
+    editor: ctx.t('sharing.role_editor'),
+    viewer: ctx.t('sharing.role_viewer'),
+  };
+}
 
-const ROLE_EMOJI = {
-  owner: '👑',
-  editor: '✏️',
-  viewer: '👁',
-};
+function getRoleEmoji(ctx) {
+  return {
+    owner: ctx.t('sharing.role_emoji_owner'),
+    editor: ctx.t('sharing.role_emoji_editor'),
+    viewer: ctx.t('sharing.role_emoji_viewer'),
+  };
+}
 
 /**
  * Get medkit members with user info
@@ -30,11 +34,11 @@ async function getMedkitMembers(medkitId) {
 /**
  * Display name for a member
  */
-function memberDisplayName(member) {
+function memberDisplayName(ctx, member) {
   const user = member.users;
-  if (!user) return 'Неизвестный';
+  if (!user) return ctx.t('sharing.unknown_user');
   if (user.username) return `@${user.username}`;
-  return user.first_name || 'Пользователь';
+  return user.first_name || ctx.t('sharing.default_user');
 }
 
 /**
@@ -55,25 +59,25 @@ async function isAlreadyMember(medkitId, userId) {
 async function showShareMenu(ctx, medkitId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit) {
-    await ctx.answerCallbackQuery('Аптечка не найдена');
+    await ctx.answerCallbackQuery(ctx.t('sharing.medkit_not_found'));
     return;
   }
 
   if (medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Только владелец может делиться аптечкой');
+    await ctx.answerCallbackQuery(ctx.t('sharing.owner_only'));
     return;
   }
 
   const keyboard = new InlineKeyboard()
-    .text('🔗 По ссылке', `medkit:${medkitId}:share:link`)
-    .text('📝 По @username', `medkit:${medkitId}:share:username`)
+    .text(ctx.t('sharing.btn_link'), `medkit:${medkitId}:share:link`)
+    .text(ctx.t('sharing.btn_username'), `medkit:${medkitId}:share:username`)
     .row()
-    .text('👥 Участники', `medkit:${medkitId}:members`)
+    .text(ctx.t('sharing.btn_members'), `medkit:${medkitId}:members`)
     .row()
-    .text('◀️ Назад', `medkit:${medkitId}`);
+    .text(ctx.t('common.back'), `medkit:${medkitId}`);
 
   await ctx.editMessageText(
-    `👥 *Поделиться аптечкой «${medkit.name}»*\n\nВыберите способ:`,
+    ctx.t('sharing.share_title', { name: medkit.name }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -83,18 +87,19 @@ async function showShareMenu(ctx, medkitId) {
 async function showLinkRoleSelect(ctx, medkitId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
+  const ROLE_LABELS = getRoleLabels(ctx);
   const keyboard = new InlineKeyboard()
-    .text('✏️ Редактор', `medkit:${medkitId}:share:link:editor`)
-    .text('👁 Только просмотр', `medkit:${medkitId}:share:link:viewer`)
+    .text(ROLE_LABELS.editor, `medkit:${medkitId}:share:link:editor`)
+    .text(ROLE_LABELS.viewer, `medkit:${medkitId}:share:link:viewer`)
     .row()
-    .text('◀️ Назад', `medkit:${medkitId}:share`);
+    .text(ctx.t('common.back'), `medkit:${medkitId}:share`);
 
   await ctx.editMessageText(
-    '🔗 *Приглашение по ссылке*\n\nВыберите роль для приглашённого:',
+    ctx.t('sharing.link_role_title'),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -104,20 +109,21 @@ async function showLinkRoleSelect(ctx, medkitId) {
 async function generateShareLink(ctx, medkitId, role) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
+  const ROLE_LABELS = getRoleLabels(ctx);
   const invitation = await createInvitation(medkitId, role);
   const link = `https://t.me/my_med_kit_bot?start=invite_${invitation.invite_code}`;
 
   const keyboard = new InlineKeyboard()
-    .text('🔗 Новая ссылка', `medkit:${medkitId}:share:link`)
+    .text(ctx.t('sharing.btn_new_link'), `medkit:${medkitId}:share:link`)
     .row()
-    .text('◀️ Назад', `medkit:${medkitId}:share`);
+    .text(ctx.t('common.back'), `medkit:${medkitId}:share`);
 
   await ctx.editMessageText(
-    `🔗 *Ссылка-приглашение*\n\nРоль: ${ROLE_LABELS[role]}\nАптечка: *${medkit.name}*\n\nОтправьте эту ссылку:\n\`${link}\``,
+    ctx.t('sharing.link_result', { role: ROLE_LABELS[role], name: medkit.name, link }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -127,18 +133,19 @@ async function generateShareLink(ctx, medkitId, role) {
 async function showUsernameRoleSelect(ctx, medkitId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
+  const ROLE_LABELS = getRoleLabels(ctx);
   const keyboard = new InlineKeyboard()
-    .text('✏️ Редактор', `medkit:${medkitId}:share:user:editor`)
-    .text('👁 Только просмотр', `medkit:${medkitId}:share:user:viewer`)
+    .text(ROLE_LABELS.editor, `medkit:${medkitId}:share:user:editor`)
+    .text(ROLE_LABELS.viewer, `medkit:${medkitId}:share:user:viewer`)
     .row()
-    .text('◀️ Назад', `medkit:${medkitId}:share`);
+    .text(ctx.t('common.back'), `medkit:${medkitId}:share`);
 
   await ctx.editMessageText(
-    '📝 *Приглашение по username*\n\nВыберите роль для приглашённого:',
+    ctx.t('sharing.username_role_title'),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -148,10 +155,11 @@ async function showUsernameRoleSelect(ctx, medkitId) {
 async function askUsername(ctx, medkitId, role) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
+  const ROLE_LABELS = getRoleLabels(ctx);
   const msgId = ctx.callbackQuery.message.message_id;
 
   await supabase.from('sessions').upsert(
@@ -164,10 +172,10 @@ async function askUsername(ctx, medkitId, role) {
   );
 
   const keyboard = new InlineKeyboard()
-    .text('❌ Отмена', `medkit:${medkitId}:share`);
+    .text(ctx.t('common.cancel'), `medkit:${medkitId}:share`);
 
   await ctx.editMessageText(
-    `📝 *Приглашение по username*\n\nРоль: ${ROLE_LABELS[role]}\n\nВведите @username пользователя (без @):`,
+    ctx.t('sharing.username_prompt', { role: ROLE_LABELS[role] }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -177,26 +185,28 @@ async function askUsername(ctx, medkitId, role) {
 async function showMembers(ctx, medkitId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit) {
-    await ctx.answerCallbackQuery('Аптечка не найдена');
+    await ctx.answerCallbackQuery(ctx.t('sharing.medkit_not_found'));
     return;
   }
 
+  const ROLE_LABELS = getRoleLabels(ctx);
+  const ROLE_EMOJI = getRoleEmoji(ctx);
   const members = await getMedkitMembers(medkitId);
   const isOwner = medkit.role === 'owner';
 
-  let text = `👥 *Участники: ${medkit.name}*\n\n`;
+  let text = ctx.t('sharing.members_title', { name: medkit.name });
 
   for (const m of members) {
-    const name = memberDisplayName(m);
+    const name = memberDisplayName(ctx, m);
     text += `${ROLE_EMOJI[m.role] || '👤'} ${name} — ${ROLE_LABELS[m.role] || m.role}\n`;
   }
 
   const pendingInvites = await getMedkitInvitations(medkitId);
   if (pendingInvites.length > 0) {
-    text += '\n📨 *Ожидают принятия:*\n';
+    text += '\n' + ctx.t('sharing.members_pending');
     for (const inv of pendingInvites) {
-      const target = inv.invited_username ? `@${inv.invited_username}` : 'по ссылке';
-      text += `⏳ ${target} — ${ROLE_LABELS[inv.role]}\n`;
+      const target = inv.invited_username ? `@${inv.invited_username}` : ctx.t('sharing.pending_by_link');
+      text += ctx.t('sharing.members_pending_item', { name: target, role: ROLE_LABELS[inv.role] });
     }
   }
 
@@ -206,20 +216,20 @@ async function showMembers(ctx, medkitId) {
     // Show non-owner members with action buttons
     const nonOwners = members.filter(m => m.role !== 'owner');
     for (const m of nonOwners) {
-      const name = memberDisplayName(m);
+      const name = memberDisplayName(ctx, m);
       keyboard
         .text(`${ROLE_EMOJI[m.role]} ${name}`, `medkit:${medkitId}:member:${m.id}`)
         .row();
     }
-    keyboard.text('📨 Пригласить', `medkit:${medkitId}:share`).row();
+    keyboard.text(ctx.t('sharing.btn_invite'), `medkit:${medkitId}:share`).row();
   }
 
   // Non-owners can leave
   if (!isOwner) {
-    keyboard.text('🚪 Покинуть аптечку', `medkit:${medkitId}:leave`).row();
+    keyboard.text(ctx.t('sharing.btn_leave'), `medkit:${medkitId}:leave`).row();
   }
 
-  keyboard.text('◀️ Назад', isOwner ? `medkit:${medkitId}:share` : `medkit:${medkitId}`);
+  keyboard.text(ctx.t('common.back'), isOwner ? `medkit:${medkitId}:share` : `medkit:${medkitId}`);
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -229,7 +239,7 @@ async function showMembers(ctx, medkitId) {
 async function showMemberDetail(ctx, medkitId, memberId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
@@ -240,23 +250,24 @@ async function showMemberDetail(ctx, medkitId, memberId) {
     .single();
 
   if (!member) {
-    await ctx.answerCallbackQuery('Участник не найден');
+    await ctx.answerCallbackQuery(ctx.t('sharing.member_not_found'));
     return;
   }
 
-  const name = memberDisplayName(member);
+  const ROLE_LABELS = getRoleLabels(ctx);
+  const name = memberDisplayName(ctx, member);
 
   const keyboard = new InlineKeyboard()
-    .text('✏️ Изменить роль', `medkit:${medkitId}:member:${memberId}:role`)
+    .text(ctx.t('sharing.btn_change_role'), `medkit:${medkitId}:member:${memberId}:role`)
     .row()
-    .text('👑 Передать владение', `medkit:${medkitId}:transfer:${memberId}`)
+    .text(ctx.t('sharing.btn_transfer'), `medkit:${medkitId}:transfer:${memberId}`)
     .row()
-    .text('🗑 Удалить участника', `medkit:${medkitId}:member:${memberId}:remove`)
+    .text(ctx.t('sharing.btn_remove_member'), `medkit:${medkitId}:member:${memberId}:remove`)
     .row()
-    .text('◀️ Назад', `medkit:${medkitId}:members`);
+    .text(ctx.t('common.back'), `medkit:${medkitId}:members`);
 
   await ctx.editMessageText(
-    `👤 *Участник: ${name}*\nРоль: ${ROLE_LABELS[member.role]}\n\nВыберите действие:`,
+    ctx.t('sharing.member_detail', { name, role: ROLE_LABELS[member.role] }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -266,18 +277,19 @@ async function showMemberDetail(ctx, medkitId, memberId) {
 async function showRoleSelect(ctx, medkitId, memberId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
+  const ROLE_LABELS = getRoleLabels(ctx);
   const keyboard = new InlineKeyboard()
-    .text('✏️ Редактор', `medkit:${medkitId}:member:${memberId}:setrole:editor`)
-    .text('👁 Только просмотр', `medkit:${medkitId}:member:${memberId}:setrole:viewer`)
+    .text(ROLE_LABELS.editor, `medkit:${medkitId}:member:${memberId}:setrole:editor`)
+    .text(ROLE_LABELS.viewer, `medkit:${medkitId}:member:${memberId}:setrole:viewer`)
     .row()
-    .text('◀️ Назад', `medkit:${medkitId}:member:${memberId}`);
+    .text(ctx.t('common.back'), `medkit:${medkitId}:member:${memberId}`);
 
   await ctx.editMessageText(
-    '🔄 *Изменить роль*\n\nВыберите новую роль:',
+    ctx.t('sharing.change_role_title'),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -285,7 +297,7 @@ async function showRoleSelect(ctx, medkitId, memberId) {
 async function setMemberRole(ctx, medkitId, memberId, role) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
@@ -296,9 +308,11 @@ async function setMemberRole(ctx, medkitId, memberId, role) {
     .single();
 
   if (!member) {
-    await ctx.answerCallbackQuery('Участник не найден');
+    await ctx.answerCallbackQuery(ctx.t('sharing.member_not_found'));
     return;
   }
+
+  const ROLE_LABELS = getRoleLabels(ctx);
 
   await supabase
     .from('medkit_members')
@@ -309,11 +323,11 @@ async function setMemberRole(ctx, medkitId, memberId, role) {
   try {
     await ctx.api.sendMessage(
       member.users.telegram_id,
-      `🔄 Ваша роль в аптечке «${medkit.name}» изменена на: ${ROLE_LABELS[role]}`
+      ctx.t('sharing.role_changed_notif', { medkit: medkit.name, role: ROLE_LABELS[role] })
     );
   } catch { /* user may have blocked the bot */ }
 
-  await ctx.answerCallbackQuery('Роль изменена');
+  await ctx.answerCallbackQuery(ctx.t('sharing.role_changed_toast'));
   await showMembers(ctx, medkitId);
 }
 
@@ -322,7 +336,7 @@ async function setMemberRole(ctx, medkitId, memberId, role) {
 async function confirmRemoveMember(ctx, medkitId, memberId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
@@ -333,19 +347,19 @@ async function confirmRemoveMember(ctx, medkitId, memberId) {
     .single();
 
   if (!member) {
-    await ctx.answerCallbackQuery('Участник не найден');
+    await ctx.answerCallbackQuery(ctx.t('sharing.member_not_found'));
     return;
   }
 
-  const name = memberDisplayName(member);
+  const name = memberDisplayName(ctx, member);
 
   const keyboard = new InlineKeyboard()
-    .text('✅ Да, удалить', `medkit:${medkitId}:member:${memberId}:remove:confirm`)
-    .text('❌ Нет', `medkit:${medkitId}:member:${memberId}`)
+    .text(ctx.t('common.yes_delete'), `medkit:${medkitId}:member:${memberId}:remove:confirm`)
+    .text(ctx.t('common.no'), `medkit:${medkitId}:member:${memberId}`)
     ;
 
   await ctx.editMessageText(
-    `🗑 Удалить участника *${name}* из аптечки «${medkit.name}»?`,
+    ctx.t('sharing.remove_confirm', { name, medkit: medkit.name }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -353,7 +367,7 @@ async function confirmRemoveMember(ctx, medkitId, memberId) {
 async function removeMember(ctx, medkitId, memberId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
@@ -364,7 +378,7 @@ async function removeMember(ctx, medkitId, memberId) {
     .single();
 
   if (!member) {
-    await ctx.answerCallbackQuery('Участник не найден');
+    await ctx.answerCallbackQuery(ctx.t('sharing.member_not_found'));
     return;
   }
 
@@ -377,11 +391,11 @@ async function removeMember(ctx, medkitId, memberId) {
   try {
     await ctx.api.sendMessage(
       member.users.telegram_id,
-      `❌ Вы были удалены из аптечки «${medkit.name}».`
+      ctx.t('sharing.remove_notif', { medkit: medkit.name })
     );
   } catch { /* user may have blocked the bot */ }
 
-  await ctx.answerCallbackQuery('Участник удалён');
+  await ctx.answerCallbackQuery(ctx.t('sharing.remove_toast'));
   await showMembers(ctx, medkitId);
 }
 
@@ -390,21 +404,21 @@ async function removeMember(ctx, medkitId, memberId) {
 async function confirmLeave(ctx, medkitId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit) {
-    await ctx.answerCallbackQuery('Аптечка не найдена');
+    await ctx.answerCallbackQuery(ctx.t('sharing.medkit_not_found'));
     return;
   }
 
   if (medkit.role === 'owner') {
-    await ctx.answerCallbackQuery('Владелец не может покинуть аптечку. Сначала передайте владение.');
+    await ctx.answerCallbackQuery(ctx.t('sharing.leave_owner'));
     return;
   }
 
   const keyboard = new InlineKeyboard()
-    .text('✅ Да, покинуть', `medkit:${medkitId}:leave:confirm`)
-    .text('❌ Нет', `medkit:${medkitId}:members`);
+    .text(ctx.t('sharing.btn_leave_confirm'), `medkit:${medkitId}:leave:confirm`)
+    .text(ctx.t('common.no'), `medkit:${medkitId}:members`);
 
   await ctx.editMessageText(
-    `🚪 Вы уверены, что хотите покинуть аптечку «${medkit.name}»?`,
+    ctx.t('sharing.leave_confirm', { name: medkit.name }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -412,7 +426,7 @@ async function confirmLeave(ctx, medkitId) {
 async function leaveMedkit(ctx, medkitId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role === 'owner') {
-    await ctx.answerCallbackQuery('Невозможно покинуть аптечку');
+    await ctx.answerCallbackQuery(ctx.t('sharing.leave_impossible'));
     return;
   }
 
@@ -432,15 +446,15 @@ async function leaveMedkit(ctx, medkitId) {
       .single();
 
     if (ownerMember?.users?.telegram_id) {
-      const name = ctx.dbUser.username ? `@${ctx.dbUser.username}` : ctx.dbUser.first_name || 'Пользователь';
+      const name = ctx.dbUser.username ? `@${ctx.dbUser.username}` : ctx.dbUser.first_name || ctx.t('sharing.default_user');
       await ctx.api.sendMessage(
         ownerMember.users.telegram_id,
-        `🚪 ${name} покинул(а) аптечку «${medkit.name}».`
+        ctx.t('sharing.leave_owner_notif', { name, medkit: medkit.name })
       );
     }
   } catch { /* ignore */ }
 
-  await ctx.answerCallbackQuery('Вы покинули аптечку');
+  await ctx.answerCallbackQuery(ctx.t('sharing.leave_toast'));
 
   // Go back to medkit list
   const { getUserMedkits } = await import('../db/queries/medkits.js');
@@ -448,12 +462,12 @@ async function leaveMedkit(ctx, medkitId) {
 
   const keyboard = new InlineKeyboard();
   if (medkits.length === 0) {
-    keyboard.text('➕ Создать аптечку', 'medkit:create').row();
+    keyboard.text(ctx.t('medkit.btn_create'), 'medkit:create').row();
   }
-  keyboard.text('◀️ К аптечкам', 'medkits');
+  keyboard.text(ctx.t('medkit.btn_to_medkits'), 'medkits');
 
   await ctx.editMessageText(
-    `✅ Вы покинули аптечку «${medkit.name}».`,
+    ctx.t('sharing.leave_done', { name: medkit.name }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -463,7 +477,7 @@ async function leaveMedkit(ctx, medkitId) {
 async function confirmTransfer(ctx, medkitId, memberId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
@@ -474,18 +488,18 @@ async function confirmTransfer(ctx, medkitId, memberId) {
     .single();
 
   if (!member) {
-    await ctx.answerCallbackQuery('Участник не найден');
+    await ctx.answerCallbackQuery(ctx.t('sharing.member_not_found'));
     return;
   }
 
-  const name = memberDisplayName(member);
+  const name = memberDisplayName(ctx, member);
 
   const keyboard = new InlineKeyboard()
-    .text('✅ Да, передать', `medkit:${medkitId}:transfer:${memberId}:confirm`)
-    .text('❌ Нет', `medkit:${medkitId}:member:${memberId}`);
+    .text(ctx.t('sharing.btn_transfer_confirm'), `medkit:${medkitId}:transfer:${memberId}:confirm`)
+    .text(ctx.t('common.no'), `medkit:${medkitId}:member:${memberId}`);
 
   await ctx.editMessageText(
-    `👑 *Передача владения*\n\nВы уверены, что хотите передать владение аптечкой «${medkit.name}» пользователю *${name}*?\n\n⚠️ Вы станете редактором.`,
+    ctx.t('sharing.transfer_confirm', { medkit: medkit.name, name }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -493,7 +507,7 @@ async function confirmTransfer(ctx, medkitId, memberId) {
 async function transferOwnership(ctx, medkitId, memberId) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit || medkit.role !== 'owner') {
-    await ctx.answerCallbackQuery('Нет доступа');
+    await ctx.answerCallbackQuery(ctx.t('sharing.no_access'));
     return;
   }
 
@@ -504,7 +518,7 @@ async function transferOwnership(ctx, medkitId, memberId) {
     .single();
 
   if (!member) {
-    await ctx.answerCallbackQuery('Участник не найден');
+    await ctx.answerCallbackQuery(ctx.t('sharing.member_not_found'));
     return;
   }
 
@@ -534,21 +548,21 @@ async function transferOwnership(ctx, medkitId, memberId) {
     .eq('id', medkitId);
 
   // Notify new owner
-  const name = memberDisplayName(member);
+  const name = memberDisplayName(ctx, member);
   try {
     await ctx.api.sendMessage(
       member.users.telegram_id,
-      `👑 Вам передано владение аптечкой «${medkit.name}»!`
+      ctx.t('sharing.transfer_notif', { name: medkit.name })
     );
   } catch { /* user may have blocked the bot */ }
 
-  await ctx.answerCallbackQuery('Владение передано');
+  await ctx.answerCallbackQuery(ctx.t('sharing.transfer_toast'));
 
   const keyboard = new InlineKeyboard()
-    .text('◀️ К аптечке', `medkit:${medkitId}`);
+    .text(ctx.t('medkit.btn_to_medkit'), `medkit:${medkitId}`);
 
   await ctx.editMessageText(
-    `✅ Владение аптечкой «${medkit.name}» передано пользователю *${name}*.\n\nВаша новая роль: ✏️ Редактор`,
+    ctx.t('sharing.transfer_done', { medkit: medkit.name, name }),
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 }
@@ -560,25 +574,25 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
 
   if (!invitation) {
     await ctx.reply(
-      '❌ Приглашение недействительно или срок его действия истёк.',
+      ctx.t('sharing.invite_invalid'),
       {
-        reply_markup: new InlineKeyboard().text('🏠 Главное меню', 'main_menu'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.main_menu'), 'main_menu'),
       }
     );
     return;
   }
 
-  const medkitName = invitation.medkits?.name || 'Неизвестная аптечка';
+  const medkitName = invitation.medkits?.name || ctx.t('sharing.invite_unknown_medkit');
 
   // Check if user is already a member
   const alreadyMember = await isAlreadyMember(invitation.medkit_id, ctx.dbUser.id);
   if (alreadyMember) {
     await ctx.reply(
-      `ℹ️ Вы уже являетесь участником аптечки «${medkitName}».`,
+      ctx.t('sharing.invite_already_member', { name: medkitName }),
       {
         reply_markup: new InlineKeyboard()
-          .text('📦 Открыть', `medkit:${invitation.medkit_id}`)
-          .text('🏠 Главное меню', 'main_menu'),
+          .text(ctx.t('common.open'), `medkit:${invitation.medkit_id}`)
+          .text(ctx.t('common.main_menu'), 'main_menu'),
       }
     );
     return;
@@ -587,9 +601,9 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
   // Check if invitation is for specific username
   if (invitation.invited_username && invitation.invited_username !== ctx.dbUser.username) {
     await ctx.reply(
-      '❌ Это приглашение предназначено для другого пользователя.',
+      ctx.t('sharing.invite_wrong_user'),
       {
-        reply_markup: new InlineKeyboard().text('🏠 Главное меню', 'main_menu'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.main_menu'), 'main_menu'),
       }
     );
     return;
@@ -598,9 +612,9 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
   // Check if user is the owner (can't accept own invitation)
   if (invitation.medkits?.owner_id === ctx.dbUser.id) {
     await ctx.reply(
-      'ℹ️ Вы являетесь владельцем этой аптечки.',
+      ctx.t('sharing.invite_is_owner'),
       {
-        reply_markup: new InlineKeyboard().text('🏠 Главное меню', 'main_menu'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.main_menu'), 'main_menu'),
       }
     );
     return;
@@ -610,20 +624,21 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
   const result = await acceptInvitation(invitation.id, ctx.dbUser.id);
   if (!result) {
     await ctx.reply(
-      '❌ Не удалось принять приглашение. Попробуйте позже.',
+      ctx.t('sharing.invite_failed'),
       {
-        reply_markup: new InlineKeyboard().text('🏠 Главное меню', 'main_menu'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.main_menu'), 'main_menu'),
       }
     );
     return;
   }
 
+  const ROLE_LABELS = getRoleLabels(ctx);
   await ctx.reply(
-    `✅ Вы присоединились к аптечке «${medkitName}»!\n\nРоль: ${ROLE_LABELS[invitation.role]}`,
+    ctx.t('sharing.invite_accepted', { name: medkitName, role: ROLE_LABELS[invitation.role] }),
     {
       reply_markup: new InlineKeyboard()
-        .text('📦 Открыть', `medkit:${invitation.medkit_id}`)
-        .text('🏠 Главное меню', 'main_menu'),
+        .text(ctx.t('common.open'), `medkit:${invitation.medkit_id}`)
+        .text(ctx.t('common.main_menu'), 'main_menu'),
     }
   );
 
@@ -637,10 +652,10 @@ export async function handleInviteDeepLink(ctx, inviteCode) {
         .single();
 
       if (owner?.telegram_id) {
-        const inviteeName = ctx.dbUser.username ? `@${ctx.dbUser.username}` : ctx.dbUser.first_name || 'Пользователь';
+        const inviteeName = ctx.dbUser.username ? `@${ctx.dbUser.username}` : ctx.dbUser.first_name || ctx.t('sharing.default_user');
         await ctx.api.sendMessage(
           owner.telegram_id,
-          `👥 ${inviteeName} присоединился к аптечке «${medkitName}»!`
+          ctx.t('sharing.invite_owner_notif', { name: inviteeName, medkit: medkitName })
         );
       }
     }
@@ -657,8 +672,8 @@ export async function handleShareText(ctx, state) {
 
   if (!text) {
     await editBotMsg(ctx, msgId,
-      '⚠️ Введите корректный username.',
-      new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}:share`)
+      ctx.t('sharing.username_invalid'),
+      new InlineKeyboard().text(ctx.t('common.back'), `medkit:${medkitId}:share`)
     );
     return;
   }
@@ -666,8 +681,8 @@ export async function handleShareText(ctx, state) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit) {
     await editBotMsg(ctx, msgId,
-      '❌ Аптечка не найдена.',
-      new InlineKeyboard().text('◀️ Назад', 'medkits')
+      ctx.t('sharing.medkit_not_found_text'),
+      new InlineKeyboard().text(ctx.t('common.back'), 'medkits')
     );
     return;
   }
@@ -681,11 +696,11 @@ export async function handleShareText(ctx, state) {
 
   if (!targetUser) {
     await editBotMsg(ctx, msgId,
-      `❌ Пользователь @${text} не найден.\n\nОн должен сначала написать боту.`,
+      ctx.t('sharing.username_not_found', { name: text }),
       new InlineKeyboard()
-        .text('🔄 Попробовать снова', `medkit:${medkitId}:share:user:${role}`)
+        .text(ctx.t('common.retry'), `medkit:${medkitId}:share:user:${role}`)
         .row()
-        .text('◀️ Назад', `medkit:${medkitId}:share`)
+        .text(ctx.t('common.back'), `medkit:${medkitId}:share`)
     );
     return;
   }
@@ -694,8 +709,8 @@ export async function handleShareText(ctx, state) {
   const alreadyMember = await isAlreadyMember(medkitId, targetUser.id);
   if (alreadyMember) {
     await editBotMsg(ctx, msgId,
-      `ℹ️ @${text} уже является участником этой аптечки.`,
-      new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}:share`)
+      ctx.t('sharing.username_already_member', { name: text }),
+      new InlineKeyboard().text(ctx.t('common.back'), `medkit:${medkitId}:share`)
     );
     return;
   }
@@ -703,11 +718,13 @@ export async function handleShareText(ctx, state) {
   // Check if it's the owner themselves
   if (targetUser.id === ctx.dbUser.id) {
     await editBotMsg(ctx, msgId,
-      'ℹ️ Вы не можете пригласить самого себя.',
-      new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}:share`)
+      ctx.t('sharing.username_self'),
+      new InlineKeyboard().text(ctx.t('common.back'), `medkit:${medkitId}:share`)
     );
     return;
   }
+
+  const ROLE_LABELS = getRoleLabels(ctx);
 
   // Create invitation
   const invitation = await createInvitation(medkitId, role, text);
@@ -717,30 +734,30 @@ export async function handleShareText(ctx, state) {
   try {
     await ctx.api.sendMessage(
       targetUser.telegram_id,
-      `📨 Вас пригласили в аптечку «${medkit.name}»!\n\nРоль: ${ROLE_LABELS[role]}\n\nНажмите, чтобы принять:`,
+      ctx.t('sharing.username_notif', { medkit: medkit.name, role: ROLE_LABELS[role] }),
       {
         reply_markup: new InlineKeyboard()
-          .url('✅ Принять приглашение', link),
+          .url(ctx.t('sharing.btn_accept'), link),
       }
     );
   } catch {
     // User may have blocked the bot
     await editBotMsg(ctx, msgId,
-      `⚠️ Не удалось отправить уведомление @${text}. Возможно, пользователь заблокировал бота.\n\nСсылка-приглашение:\n\`${link}\``,
+      ctx.t('sharing.username_notif_fail', { name: text, link }),
       {
         parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}:share`),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `medkit:${medkitId}:share`),
       }
     );
     return;
   }
 
   await editBotMsg(ctx, msgId,
-    `✅ Приглашение отправлено @${text}!\n\nРоль: ${ROLE_LABELS[role]}`,
+    ctx.t('sharing.username_sent', { name: text, role: ROLE_LABELS[role] }),
     new InlineKeyboard()
-      .text('📨 Пригласить ещё', `medkit:${medkitId}:share:username`)
+      .text(ctx.t('sharing.btn_invite_more'), `medkit:${medkitId}:share:username`)
       .row()
-      .text('◀️ Назад', `medkit:${medkitId}:share`)
+      .text(ctx.t('common.back'), `medkit:${medkitId}:share`)
   );
 }
 

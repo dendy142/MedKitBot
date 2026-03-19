@@ -56,10 +56,10 @@ export async function handleTextState(ctx) {
     const medkit = await createMedkit(text, ctx.dbUser.id);
     await logAction(ctx.dbUser.id, 'create', 'medkit', medkit.id, { name: text });
     await editBotMsg(ctx, msgId,
-      `✅ Аптечка *«${text}»* создана!`,
+      ctx.t('medkit.created', { name: text }),
       new InlineKeyboard()
-        .text('📦 Открыть', `medkit:${medkit.id}`)
-        .text('◀️ К аптечкам', 'medkits')
+        .text(ctx.t('common.open'), `medkit:${medkit.id}`)
+        .text(ctx.t('medkit.btn_to_medkits'), 'medkits')
     );
     return true;
   }
@@ -69,8 +69,8 @@ export async function handleTextState(ctx) {
     await renameMedkit(state.medkitId, text);
     await logAction(ctx.dbUser.id, 'rename', 'medkit', state.medkitId, { name: text });
     await editBotMsg(ctx, msgId,
-      `✅ Аптечка переименована в *«${text}»*`,
-      new InlineKeyboard().text('◀️ К аптечке', `medkit:${state.medkitId}`)
+      ctx.t('medkit.renamed', { name: text }),
+      new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${state.medkitId}`)
     );
     return true;
   }
@@ -83,8 +83,8 @@ export async function handleTextState(ctx) {
 
     if (isNaN(num) || num <= 0) {
       await editBotMsg(ctx, msgId,
-        '⚠️ Некорректное число.',
-        new InlineKeyboard().text('◀️ Назад', `med:${state.medId}`)
+        ctx.t('medicine.restock_invalid'),
+        new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}`)
       );
       return true;
     }
@@ -93,8 +93,8 @@ export async function handleTextState(ctx) {
     await updateMedicine(state.medId, { quantity: newQty });
     await logMedicineChange(state.medId, ctx.dbUser.id, 'quantity', med.quantity, newQty);
     await editBotMsg(ctx, msgId,
-      `✅ Остаток пополнен: ${formatQuantity(newQty, med.quantity_unit)}`,
-      new InlineKeyboard().text('◀️ К лекарству', `med:${state.medId}`)
+      ctx.t('medicine.restock_done', { quantity: formatQuantity(newQty, med.quantity_unit) }),
+      new InlineKeyboard().text(ctx.t('medicine.btn_to_medicine'), `med:${state.medId}`)
     );
     return true;
   }
@@ -103,10 +103,10 @@ export async function handleTextState(ctx) {
     await clearState(ctx.dbUser.id);
     await addToShoppingList(ctx.dbUser.id, text);
     await editBotMsg(ctx, msgId,
-      `✅ *${text}* добавлен в список покупок!`,
+      ctx.t('medicine.added_to_shop', { name: text }),
       new InlineKeyboard()
-        .text('➕ Ещё', 'shop:add')
-        .text('🛒 К списку', 'shopping')
+        .text(ctx.t('common.add_more'), 'shop:add')
+        .text(ctx.t('medicine.btn_to_shop'), 'shopping')
     );
     return true;
   }
@@ -138,8 +138,8 @@ export async function handleTextState(ctx) {
       const parsed = parseDate(text);
       if (!parsed) {
         await editBotMsg(ctx, msgId,
-          '⚠️ Не удалось распознать дату.',
-          new InlineKeyboard().text('◀️ Назад', `med:${state.medId}:edit`)
+          ctx.t('addmed.invalid_date'),
+          new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:edit`)
         );
         return true;
       }
@@ -150,8 +150,8 @@ export async function handleTextState(ctx) {
       const num = parseFloat(text);
       if (isNaN(num) || num < 0) {
         await editBotMsg(ctx, msgId,
-          '⚠️ Некорректное число.',
-          new InlineKeyboard().text('◀️ Назад', `med:${state.medId}:edit`)
+          ctx.t('medicine.restock_invalid'),
+          new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:edit`)
         );
         return true;
       }
@@ -162,8 +162,8 @@ export async function handleTextState(ctx) {
     await updateMedicine(state.medId, updateData);
     await logMedicineChange(state.medId, ctx.dbUser.id, field, med[field], newValue);
     await editBotMsg(ctx, msgId,
-      `✅ Поле обновлено.`,
-      new InlineKeyboard().text('◀️ К лекарству', `med:${state.medId}`)
+      ctx.t('medicine.edit_done'),
+      new InlineKeyboard().text(ctx.t('medicine.btn_to_medicine'), `med:${state.medId}`)
     );
     return true;
   }
@@ -181,14 +181,14 @@ export async function handleTextState(ctx) {
     try {
       await markIntakeTaken(state.logId, text);
       await editBotMsg(ctx, msgId,
-        `✅ Приём отмечен с заметкой: _${text}_`,
-        new InlineKeyboard().text('💊 К приёмам', 'intake_today').text('◀️ Меню', 'main_menu')
+        ctx.t('intake.note_saved', { text: text }),
+        new InlineKeyboard().text(ctx.t('intake.btn_today'), 'intake_today').text(ctx.t('common.main_menu'), 'main_menu')
       );
     } catch (e) {
       console.error('Error adding intake note:', e);
       await editBotMsg(ctx, msgId,
-        '❌ Ошибка при сохранении заметки.',
-        new InlineKeyboard().text('💊 К приёмам', 'intake_today')
+        ctx.t('common.error'),
+        new InlineKeyboard().text(ctx.t('intake.btn_today'), 'intake_today')
       );
     }
     return true;

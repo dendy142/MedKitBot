@@ -15,11 +15,11 @@ async function showMedkitList(ctx, page = 0) {
 
   if (medkits.length === 0) {
     const keyboard = new InlineKeyboard()
-      .text('➕ Создать аптечку', 'medkit:create')
+      .text(ctx.t('medkit.btn_create'), 'medkit:create')
       .row()
-      .text('◀️ Назад', 'main_menu');
+      .text(ctx.t('common.back'), 'main_menu');
 
-    const text = '📦 *Мои аптечки*\n\nУ вас пока нет аптечек. Создайте первую!';
+    const text = ctx.t('medkit.list_empty');
     if (ctx.callbackQuery) {
       await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
     } else {
@@ -29,7 +29,7 @@ async function showMedkitList(ctx, page = 0) {
   }
 
   const pageItems = paginateItems(medkits, page);
-  let text = '📦 *Мои аптечки*\n\n';
+  let text = ctx.t('medkit.list_title');
 
   const keyboard = new InlineKeyboard();
 
@@ -41,8 +41,8 @@ async function showMedkitList(ctx, page = 0) {
 
   addPagination(keyboard, page, medkits.length, 'medkits');
   keyboard.row();
-  keyboard.text('➕ Создать аптечку', 'medkit:create').row();
-  keyboard.text('◀️ Назад', 'main_menu');
+  keyboard.text(ctx.t('medkit.btn_create'), 'medkit:create').row();
+  keyboard.text(ctx.t('common.back'), 'main_menu');
 
   if (ctx.callbackQuery) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -57,7 +57,7 @@ async function showMedkitList(ctx, page = 0) {
 async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } = {}) {
   const medkit = await getMedkit(medkitId, ctx.dbUser.id);
   if (!medkit) {
-    await ctx.answerCallbackQuery('Аптечка не найдена');
+    await ctx.answerCallbackQuery(ctx.t('addmed.medkit_not_found'));
     return;
   }
 
@@ -74,9 +74,10 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
 
   const pageItems = paginateItems(medicines, page);
 
-  let text = `📦 *${medkit.name}* (${medicines.length})`;
+  let text = ctx.t('medkit.title', { name: medkit.name, count: medicines.length });
   if (filterField) {
-    text += `\n🔍 Фильтр: ${filterField === 'category' ? 'категория' : 'тег'} «${filterValue}»`;
+    const filterType = filterField === 'category' ? ctx.t('medkit.filter_category') : ctx.t('medkit.filter_tag');
+    text += ctx.t('medkit.filter_active', { type: filterType, value: filterValue });
   }
   text += '\n\n';
 
@@ -85,11 +86,11 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
     const qty = formatQuantity(med.quantity, med.quantity_unit);
     const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format) : '';
     text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
-    text += `   Остаток: ${qty}${expiry ? ' | До: ' + expiry : ''}\n`;
+    text += ctx.t('medkit.med_line_remainder', { qty }) + (expiry ? ctx.t('medkit.med_line_expiry', { expiry }) : '') + '\n';
   }
 
   if (medicines.length === 0) {
-    text += '_Аптечка пуста. Добавьте первое лекарство!_\n';
+    text += ctx.t('medkit.empty');
   }
 
   const keyboard = new InlineKeyboard();
@@ -106,16 +107,16 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
   addPagination(keyboard, page, medicines.length, `mk:${medkitId}`);
 
   keyboard.row();
-  keyboard.text('➕ Добавить', `medkit:${medkitId}:add`);
-  keyboard.text('🔀 Сортировка', `medkit:${medkitId}:sort`);
-  keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
+  keyboard.text(ctx.t('medkit.btn_add'), `medkit:${medkitId}:add`);
+  keyboard.text(ctx.t('medkit.btn_sort'), `medkit:${medkitId}:sort`);
+  keyboard.text(ctx.t('medkit.btn_filter'), `medkit:${medkitId}:filter`);
   keyboard.row();
-  keyboard.text('👥 Поделиться', `medkit:${medkitId}:share`);
-  keyboard.text('✏️ Редакт.', `medkit:${medkitId}:rename`);
-  keyboard.text('🗑 Удалить', `medkit:${medkitId}:delete`);
+  keyboard.text(ctx.t('medkit.btn_share'), `medkit:${medkitId}:share`);
+  keyboard.text(ctx.t('medkit.btn_edit'), `medkit:${medkitId}:rename`);
+  keyboard.text(ctx.t('medkit.btn_delete'), `medkit:${medkitId}:delete`);
   keyboard.row();
-  keyboard.text('📂 Архив', `medkit:${medkitId}:archive`);
-  keyboard.text('◀️ Назад', 'medkits');
+  keyboard.text(ctx.t('medkit.btn_archive'), `medkit:${medkitId}:archive`);
+  keyboard.text(ctx.t('common.back'), 'medkits');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -166,10 +167,10 @@ export function registerMedkitHandlers(bot) {
   bot.callbackQuery('medkit:create', async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
-      '📦 *Новая аптечка*\n\nВведите название:',
+      ctx.t('medkit.create_prompt'),
       {
         parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard().text('❌ Отмена', 'medkits'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'medkits'),
       }
     );
     await supabase.from('sessions').upsert(
@@ -210,10 +211,10 @@ export function registerMedkitHandlers(bot) {
       { onConflict: 'key' }
     );
     await ctx.editMessageText(
-      '✏️ Введите новое название аптечки:',
+      ctx.t('medkit.rename_prompt'),
       {
         parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard().text('❌ Отмена', `medkit:${ctx.match[1]}`),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), `medkit:${ctx.match[1]}`),
       }
     );
   });
@@ -225,19 +226,19 @@ export function registerMedkitHandlers(bot) {
     if (!medkit) return;
 
     await ctx.editMessageText(
-      `🗑 Вы уверены, что хотите удалить аптечку «${medkit.name}»?\n\n⚠️ Все лекарства в ней будут удалены!`,
+      ctx.t('medkit.delete_confirm', { name: medkit.name }),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('✅ Да, удалить', `medkit:${ctx.match[1]}:delete:confirm`)
-          .text('❌ Нет', `medkit:${ctx.match[1]}`),
+          .text(ctx.t('common.yes_delete'), `medkit:${ctx.match[1]}:delete:confirm`)
+          .text(ctx.t('common.no'), `medkit:${ctx.match[1]}`),
       }
     );
   });
 
   // Delete medkit — confirmed
   bot.callbackQuery(/^medkit:([0-9a-f-]+):delete:confirm$/, async (ctx) => {
-    await ctx.answerCallbackQuery('Аптечка удалена');
+    await ctx.answerCallbackQuery(ctx.t('medkit.delete_toast'));
     await deleteMedkit(ctx.match[1]);
     await logAction(ctx.dbUser.id, 'delete', 'medkit', ctx.match[1]);
     await showMedkitList(ctx);
@@ -248,19 +249,19 @@ export function registerMedkitHandlers(bot) {
     await ctx.answerCallbackQuery();
     const medkitId = ctx.match[1];
     await ctx.editMessageText(
-      '🔀 *Сортировка*\n\nВыберите порядок:',
+      ctx.t('medkit.sort_title'),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('По названию', `medkit:${medkitId}:sort:name`)
-          .text('По сроку', `medkit:${medkitId}:sort:expiry`)
+          .text(ctx.t('medkit.sort_name'), `medkit:${medkitId}:sort:name`)
+          .text(ctx.t('medkit.sort_expiry'), `medkit:${medkitId}:sort:expiry`)
           .row()
-          .text('По категории', `medkit:${medkitId}:sort:category`)
-          .text('По остатку', `medkit:${medkitId}:sort:quantity`)
+          .text(ctx.t('medkit.sort_category'), `medkit:${medkitId}:sort:category`)
+          .text(ctx.t('medkit.sort_quantity'), `medkit:${medkitId}:sort:quantity`)
           .row()
-          .text('⚠️ Проблемы', `medkit:${medkitId}:sort:problems`)
+          .text(ctx.t('medkit.sort_problems'), `medkit:${medkitId}:sort:problems`)
           .row()
-          .text('◀️ Назад', `medkit:${medkitId}`),
+          .text(ctx.t('common.back'), `medkit:${medkitId}`),
       }
     );
   });
@@ -287,13 +288,13 @@ export function registerMedkitHandlers(bot) {
 
     const pageItems = paginateItems(medicines, 0);
 
-    let text = `📦 *${medkit.name}* (${medicines.length})\n\n`;
+    let text = ctx.t('medkit.title', { name: medkit.name, count: medicines.length }) + '\n\n';
     for (const med of pageItems) {
       const emoji = medicineStatusEmoji(med, settings.thresholds);
       const qty = formatQuantity(med.quantity, med.quantity_unit);
       const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format) : '';
       text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
-      text += `   Остаток: ${qty}${expiry ? ' | До: ' + expiry : ''}\n`;
+      text += ctx.t('medkit.med_line_remainder', { qty }) + (expiry ? ctx.t('medkit.med_line_expiry', { expiry }) : '') + '\n';
     }
 
     const keyboard = new InlineKeyboard();
@@ -304,11 +305,11 @@ export function registerMedkitHandlers(bot) {
     }
     addPagination(keyboard, 0, medicines.length, `mk:${medkitId}`);
     keyboard.row();
-    keyboard.text('➕ Добавить', `medkit:${medkitId}:add`);
-    keyboard.text('🔀 Сортировка', `medkit:${medkitId}:sort`);
-    keyboard.text('📂 Фильтр', `medkit:${medkitId}:filter`);
+    keyboard.text(ctx.t('medkit.btn_add'), `medkit:${medkitId}:add`);
+    keyboard.text(ctx.t('medkit.btn_sort'), `medkit:${medkitId}:sort`);
+    keyboard.text(ctx.t('medkit.btn_filter'), `medkit:${medkitId}:filter`);
     keyboard.row();
-    keyboard.text('◀️ Назад', 'medkits');
+    keyboard.text(ctx.t('common.back'), 'medkits');
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
@@ -319,17 +320,17 @@ export function registerMedkitHandlers(bot) {
     const medkitId = ctx.match[1];
 
     await ctx.editMessageText(
-      '📂 *Фильтр*\n\nВыберите тип фильтра:',
+      ctx.t('medkit.filter_title'),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('По категории ▸', `medkit:${medkitId}:filter:cat`)
+          .text(ctx.t('medkit.filter_by_category'), `medkit:${medkitId}:filter:cat`)
           .row()
-          .text('По тегу ▸', `medkit:${medkitId}:filter:tag`)
+          .text(ctx.t('medkit.filter_by_tag'), `medkit:${medkitId}:filter:tag`)
           .row()
-          .text('❌ Сбросить', `medkit:${medkitId}`)
+          .text(ctx.t('medkit.filter_clear'), `medkit:${medkitId}`)
           .row()
-          .text('◀️ Назад', `medkit:${medkitId}`),
+          .text(ctx.t('common.back'), `medkit:${medkitId}`),
       }
     );
   });
@@ -344,8 +345,8 @@ export function registerMedkitHandlers(bot) {
 
     if (categories.length === 0) {
       await ctx.editMessageText(
-        '📂 Нет категорий в этой аптечке.',
-        { reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}:filter`) }
+        ctx.t('medkit.filter_no_categories'),
+        { reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `medkit:${medkitId}:filter`) }
       );
       return;
     }
@@ -354,10 +355,10 @@ export function registerMedkitHandlers(bot) {
     for (const cat of categories) {
       keyboard.text(cat, `medkit:${medkitId}:fcat:${cat}`).row();
     }
-    keyboard.text('◀️ Назад', `medkit:${medkitId}:filter`);
+    keyboard.text(ctx.t('common.back'), `medkit:${medkitId}:filter`);
 
     await ctx.editMessageText(
-      '📂 *Фильтр по категории*\n\nВыберите категорию:',
+      ctx.t('medkit.filter_category_title'),
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
@@ -372,8 +373,8 @@ export function registerMedkitHandlers(bot) {
 
     if (tags.length === 0) {
       await ctx.editMessageText(
-        '📂 Нет тегов в этой аптечке.',
-        { reply_markup: new InlineKeyboard().text('◀️ Назад', `medkit:${medkitId}:filter`) }
+        ctx.t('medkit.filter_no_tags'),
+        { reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `medkit:${medkitId}:filter`) }
       );
       return;
     }
@@ -382,10 +383,10 @@ export function registerMedkitHandlers(bot) {
     for (const tag of tags) {
       keyboard.text(`#${tag}`, `medkit:${medkitId}:ftag:${tag}`).row();
     }
-    keyboard.text('◀️ Назад', `medkit:${medkitId}:filter`);
+    keyboard.text(ctx.t('common.back'), `medkit:${medkitId}:filter`);
 
     await ctx.editMessageText(
-      '📂 *Фильтр по тегу*\n\nВыберите тег:',
+      ctx.t('medkit.filter_tag_title'),
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
   });
@@ -408,6 +409,6 @@ export function registerMedkitHandlers(bot) {
 
   // Share placeholder
   bot.callbackQuery(/^medkit:([0-9a-f-]+):share$/, async (ctx) => {
-    await ctx.answerCallbackQuery('Скоро! Функция в разработке.');
+    await ctx.answerCallbackQuery(ctx.t('common.feature_wip'));
   });
 }

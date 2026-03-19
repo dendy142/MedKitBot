@@ -9,14 +9,7 @@ import { supabase } from '../db/supabase.js';
  */
 export async function startOnboarding(ctx) {
   const welcomeMsg = await ctx.reply(
-    `👋 *Добро пожаловать в Medkit Bot!*\n\n` +
-    `Я помогу вам управлять домашней аптечкой:\n` +
-    `• 📦 Вести каталог лекарств\n` +
-    `• 📅 Отслеживать сроки годности\n` +
-    `• 💊 Напоминать о приёме\n` +
-    `• 👥 Делиться аптечкой с семьёй\n` +
-    `• 🛒 Вести список покупок\n\n` +
-    `Давайте настроим бот для вас!`,
+    ctx.t('onboarding.welcome'),
     { parse_mode: 'Markdown' }
   );
 
@@ -34,20 +27,12 @@ export async function startOnboarding(ctx) {
     tzKeyboard.row();
   }
 
-  await ctx.reply('🕐 Выберите ваш часовой пояс:', {
+  await ctx.reply(ctx.t('onboarding.tz_prompt'), {
     reply_markup: tzKeyboard,
   });
 }
 
-const ONBOARDING_COMPLETE_TEXT =
-  `🎉 *Всё готово! Вот что вы можете делать:*\n\n` +
-  `📦 *Аптечки* — создавайте несколько аптечек (Домашняя, Дачная, В дорогу) и переключайтесь между ними\n\n` +
-  `💊 *Лекарства* — добавляйте с дозировкой, сроком годности, категорией, фото и заметками. Помечайте важные ⭐\n\n` +
-  `📆 *Приём* — настройте расписание, и бот будет напоминать вовремя\n\n` +
-  `👥 *Общий доступ* — поделитесь аптечкой с семьёй по ссылке\n\n` +
-  `🔍 *Поиск* — просто напишите название лекарства в чат\n\n` +
-  `⚙️ *Настройки* — часовой пояс, уведомления, дайджест\n\n` +
-  `Нажмите кнопку ниже чтобы начать 👇`;
+// ONBOARDING_COMPLETE_TEXT is now fetched via ctx.t('onboarding.complete')
 
 /**
  * Register onboarding callback handlers
@@ -57,7 +42,7 @@ export function registerOnboardingHandlers(bot) {
   bot.callbackQuery(/^tz:(.+)$/, async (ctx) => {
     const timezone = ctx.match[1];
     await updateUserTimezone(ctx.dbUser.id, timezone);
-    await ctx.answerCallbackQuery('Часовой пояс установлен');
+    await ctx.answerCallbackQuery(ctx.t('onboarding.tz_set'));
 
     // Delete the welcome message
     const { data: welcomeSession } = await supabase
@@ -76,15 +61,13 @@ export function registerOnboardingHandlers(bot) {
     const medkit = await createMedkit('Домашняя', ctx.dbUser.id);
 
     await ctx.editMessageText(
-      `✅ Часовой пояс установлен!\n\n` +
-      `📦 Я создал вашу первую аптечку — *«Домашняя»*.\n\n` +
-      `Хотите добавить первое лекарство прямо сейчас?`,
+      ctx.t('onboarding.first_medkit'),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('💊 Да, добавить', `medkit:${medkit.id}:add:onboard`)
+          .text(ctx.t('onboarding.btn_add'), `medkit:${medkit.id}:add:onboard`)
           .row()
-          .text('⏭ Пропустить, покажи что тут есть', 'onboard:skip'),
+          .text(ctx.t('onboarding.btn_skip'), 'onboard:skip'),
       }
     );
   });
@@ -92,28 +75,28 @@ export function registerOnboardingHandlers(bot) {
   // Skip adding medicine → show onboarding complete with tips
   bot.callbackQuery('onboard:skip', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.editMessageText(ONBOARDING_COMPLETE_TEXT, {
+    await ctx.editMessageText(ctx.t('onboarding.complete'), {
       parse_mode: 'Markdown',
       reply_markup: new InlineKeyboard()
-        .text('📦 Мои аптечки', 'medkits')
-        .text('⚙️ Настройки', 'settings')
+        .text(ctx.t('common.to_medkits'), 'medkits')
+        .text(ctx.t('common.to_settings'), 'settings')
         .row()
-        .text('📖 Помощь', 'help')
-        .text('🏠 Главное меню', 'main_menu'),
+        .text(ctx.t('common.to_help'), 'help')
+        .text(ctx.t('common.main_menu'), 'main_menu'),
     });
   });
 
   // Called after first medicine is added during onboarding
   bot.callbackQuery('onboard:complete', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.editMessageText(ONBOARDING_COMPLETE_TEXT, {
+    await ctx.editMessageText(ctx.t('onboarding.complete'), {
       parse_mode: 'Markdown',
       reply_markup: new InlineKeyboard()
-        .text('📦 Мои аптечки', 'medkits')
-        .text('⚙️ Настройки', 'settings')
+        .text(ctx.t('common.to_medkits'), 'medkits')
+        .text(ctx.t('common.to_settings'), 'settings')
         .row()
-        .text('📖 Помощь', 'help')
-        .text('🏠 Главное меню', 'main_menu'),
+        .text(ctx.t('common.to_help'), 'help')
+        .text(ctx.t('common.main_menu'), 'main_menu'),
     });
   });
 }

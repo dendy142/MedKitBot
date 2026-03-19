@@ -11,30 +11,30 @@ async function showSettings(ctx) {
   const tz = ctx.dbUser.timezone || 'Etc/GMT-3';
   const tzLabel = TIMEZONES.find(t => t.value === tz)?.label || tz;
 
-  let text = `⚙️ *Настройки*\n\n`;
-  text += `🕐 Часовой пояс: ${tzLabel}\n`;
-  text += `🔔 Напоминания: ${s.notifications?.intake_reminders ? '✅' : '❌'}\n`;
-  text += `📅 Сроки годности: ${s.notifications?.expiry_alerts ? '✅' : '❌'}\n`;
-  text += `📉 Остатки: ${s.notifications?.low_stock_alerts ? '✅' : '❌'}\n`;
-  text += `📊 Дайджест: ${s.digest?.enabled ? '✅' : '❌'}\n`;
+  let text = ctx.t('settings.title');
+  text += ctx.t('settings.tz_label', { value: tzLabel }) + '\n';
+  text += ctx.t('settings.notif_reminders', { value: s.notifications?.intake_reminders ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.notif_expiry', { value: s.notifications?.expiry_alerts ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.notif_stock', { value: s.notifications?.low_stock_alerts ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.digest_label', { value: s.digest?.enabled ? '✅' : '❌' }) + '\n';
 
   const keyboard = new InlineKeyboard()
-    .text('🕐 Часовой пояс', 'set:tz')
+    .text(ctx.t('settings.btn_timezone'), 'set:tz')
     .row()
-    .text('🔔 Уведомления', 'set:notif')
+    .text(ctx.t('settings.btn_notifications'), 'set:notif')
     .row()
-    .text('📐 Пороги', 'set:thresh')
+    .text(ctx.t('settings.btn_thresholds'), 'set:thresh')
     .row()
-    .text('🌅 Периоды дня', 'set:periods')
+    .text(ctx.t('settings.btn_periods'), 'set:periods')
     .row()
-    .text('📊 Дайджест', 'set:digest')
+    .text(ctx.t('settings.btn_digest'), 'set:digest')
     .row()
-    .text('📋 Отображение', 'set:display')
+    .text(ctx.t('settings.btn_display'), 'set:display')
     .row()
-    .text('📤 Экспорт', 'export')
-    .text('📥 Импорт', 'import')
+    .text(ctx.t('settings.btn_export'), 'export')
+    .text(ctx.t('settings.btn_import'), 'import')
     .row()
-    .text('◀️ Назад', 'main_menu');
+    .text(ctx.t('common.back'), 'main_menu');
 
   if (ctx.callbackQuery) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -62,8 +62,8 @@ export function registerSettingsHandlers(bot) {
       if (TIMEZONES[i + 2]) keyboard.text(TIMEZONES[i + 2].label, `set:tz:${TIMEZONES[i + 2].value}`);
       keyboard.row();
     }
-    keyboard.text('◀️ Назад', 'settings');
-    await ctx.editMessageText('🕐 Выберите часовой пояс:', {
+    keyboard.text(ctx.t('common.back'), 'settings');
+    await ctx.editMessageText(ctx.t('settings.tz_prompt'), {
       reply_markup: keyboard,
     });
   });
@@ -71,7 +71,7 @@ export function registerSettingsHandlers(bot) {
   bot.callbackQuery(/^set:tz:(.+)$/, async (ctx) => {
     await updateUserTimezone(ctx.dbUser.id, ctx.match[1]);
     ctx.dbUser.timezone = ctx.match[1];
-    await ctx.answerCallbackQuery('Часовой пояс обновлён');
+    await ctx.answerCallbackQuery(ctx.t('settings.tz_toast'));
     await showSettings(ctx);
   });
 
@@ -82,17 +82,17 @@ export function registerSettingsHandlers(bot) {
     const n = s.notifications || DEFAULT_SETTINGS.notifications;
 
     const keyboard = new InlineKeyboard()
-      .text(`${n.intake_reminders ? '✅' : '❌'} Напоминания о приёме`, 'set:notif:intake_reminders')
+      .text(`${n.intake_reminders ? '✅' : '❌'} ${ctx.t('settings.notif_intake')}`, 'set:notif:intake_reminders')
       .row()
-      .text(`${n.expiry_alerts ? '✅' : '❌'} Сроки годности`, 'set:notif:expiry_alerts')
+      .text(`${n.expiry_alerts ? '✅' : '❌'} ${ctx.t('settings.notif_expiry_alerts')}`, 'set:notif:expiry_alerts')
       .row()
-      .text(`${n.low_stock_alerts ? '✅' : '❌'} Остатки`, 'set:notif:low_stock_alerts')
+      .text(`${n.low_stock_alerts ? '✅' : '❌'} ${ctx.t('settings.notif_low_stock')}`, 'set:notif:low_stock_alerts')
       .row()
-      .text(`${n.shared_medkit_changes ? '✅' : '❌'} Общие аптечки`, 'set:notif:shared_medkit_changes')
+      .text(`${n.shared_medkit_changes ? '✅' : '❌'} ${ctx.t('settings.notif_shared')}`, 'set:notif:shared_medkit_changes')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
 
-    await ctx.editMessageText('🔔 *Уведомления*\n\nНажмите чтобы вкл/выкл:', {
+    await ctx.editMessageText(ctx.t('settings.notif_title'), {
       parse_mode: 'Markdown',
       reply_markup: keyboard,
     });
@@ -105,22 +105,22 @@ export function registerSettingsHandlers(bot) {
     s.notifications[key] = !s.notifications[key];
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
-    await ctx.answerCallbackQuery(s.notifications[key] ? 'Включено' : 'Выключено');
+    await ctx.answerCallbackQuery(s.notifications[key] ? ctx.t('settings.notif_enabled_toast') : ctx.t('settings.notif_disabled_toast'));
 
     // Re-render notifications menu
     const n = s.notifications;
     const keyboard = new InlineKeyboard()
-      .text(`${n.intake_reminders ? '✅' : '❌'} Напоминания о приёме`, 'set:notif:intake_reminders')
+      .text(`${n.intake_reminders ? '✅' : '❌'} ${ctx.t('settings.notif_intake')}`, 'set:notif:intake_reminders')
       .row()
-      .text(`${n.expiry_alerts ? '✅' : '❌'} Сроки годности`, 'set:notif:expiry_alerts')
+      .text(`${n.expiry_alerts ? '✅' : '❌'} ${ctx.t('settings.notif_expiry_alerts')}`, 'set:notif:expiry_alerts')
       .row()
-      .text(`${n.low_stock_alerts ? '✅' : '❌'} Остатки`, 'set:notif:low_stock_alerts')
+      .text(`${n.low_stock_alerts ? '✅' : '❌'} ${ctx.t('settings.notif_low_stock')}`, 'set:notif:low_stock_alerts')
       .row()
-      .text(`${n.shared_medkit_changes ? '✅' : '❌'} Общие аптечки`, 'set:notif:shared_medkit_changes')
+      .text(`${n.shared_medkit_changes ? '✅' : '❌'} ${ctx.t('settings.notif_shared')}`, 'set:notif:shared_medkit_changes')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
 
-    await ctx.editMessageText('🔔 *Уведомления*\n\nНажмите чтобы вкл/выкл:', {
+    await ctx.editMessageText(ctx.t('settings.notif_title'), {
       parse_mode: 'Markdown',
       reply_markup: keyboard,
     });
@@ -132,20 +132,20 @@ export function registerSettingsHandlers(bot) {
     const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
     const t = s.thresholds || DEFAULT_SETTINGS.thresholds;
 
-    const text = `📐 *Пороги предупреждений*\n\n` +
-      `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
-      `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
+    const text = ctx.t('settings.thresh_title') +
+      ctx.t('settings.thresh_expiry', { days: t.expiry_days }) + '\n' +
+      ctx.t('settings.thresh_stock', { count: t.low_stock_count, percent: t.low_stock_percent });
 
     const keyboard = new InlineKeyboard()
-      .text('📅 Срок: 14 дн.', 'set:thresh:expiry:14')
-      .text('📅 30 дн.', 'set:thresh:expiry:30')
-      .text('📅 60 дн.', 'set:thresh:expiry:60')
+      .text(ctx.t('settings.btn_thresh_expiry_14'), 'set:thresh:expiry:14')
+      .text(ctx.t('settings.btn_thresh_expiry_30'), 'set:thresh:expiry:30')
+      .text(ctx.t('settings.btn_thresh_expiry_60'), 'set:thresh:expiry:60')
       .row()
-      .text('📉 Остаток: 3', 'set:thresh:stock:3')
-      .text('📉 5', 'set:thresh:stock:5')
-      .text('📉 10', 'set:thresh:stock:10')
+      .text(ctx.t('settings.btn_thresh_stock_3'), 'set:thresh:stock:3')
+      .text(ctx.t('settings.btn_thresh_stock_5'), 'set:thresh:stock:5')
+      .text(ctx.t('settings.btn_thresh_stock_10'), 'set:thresh:stock:10')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
@@ -157,22 +157,22 @@ export function registerSettingsHandlers(bot) {
     s.thresholds.expiry_days = days;
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
-    await ctx.answerCallbackQuery(`Порог: ${days} дней`);
+    await ctx.answerCallbackQuery(ctx.t('settings.thresh_toast_expiry', { days }));
     // Re-render
     const t = s.thresholds;
-    const text = `📐 *Пороги предупреждений*\n\n` +
-      `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
-      `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
+    const text = ctx.t('settings.thresh_title') +
+      ctx.t('settings.thresh_expiry', { days: t.expiry_days }) + '\n' +
+      ctx.t('settings.thresh_stock', { count: t.low_stock_count, percent: t.low_stock_percent });
     const keyboard = new InlineKeyboard()
-      .text('📅 Срок: 14 дн.', 'set:thresh:expiry:14')
-      .text('📅 30 дн.', 'set:thresh:expiry:30')
-      .text('📅 60 дн.', 'set:thresh:expiry:60')
+      .text(ctx.t('settings.btn_thresh_expiry_14'), 'set:thresh:expiry:14')
+      .text(ctx.t('settings.btn_thresh_expiry_30'), 'set:thresh:expiry:30')
+      .text(ctx.t('settings.btn_thresh_expiry_60'), 'set:thresh:expiry:60')
       .row()
-      .text('📉 Остаток: 3', 'set:thresh:stock:3')
-      .text('📉 5', 'set:thresh:stock:5')
-      .text('📉 10', 'set:thresh:stock:10')
+      .text(ctx.t('settings.btn_thresh_stock_3'), 'set:thresh:stock:3')
+      .text(ctx.t('settings.btn_thresh_stock_5'), 'set:thresh:stock:5')
+      .text(ctx.t('settings.btn_thresh_stock_10'), 'set:thresh:stock:10')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -183,21 +183,21 @@ export function registerSettingsHandlers(bot) {
     s.thresholds.low_stock_count = count;
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
-    await ctx.answerCallbackQuery(`Порог остатка: ${count} шт.`);
+    await ctx.answerCallbackQuery(ctx.t('settings.thresh_toast_stock', { count }));
     const t = s.thresholds;
-    const text = `📐 *Пороги предупреждений*\n\n` +
-      `📅 Срок годности: за *${t.expiry_days}* дн.\n` +
-      `📉 Остаток: *${t.low_stock_count}* шт. или *${t.low_stock_percent}%*`;
+    const text = ctx.t('settings.thresh_title') +
+      ctx.t('settings.thresh_expiry', { days: t.expiry_days }) + '\n' +
+      ctx.t('settings.thresh_stock', { count: t.low_stock_count, percent: t.low_stock_percent });
     const keyboard = new InlineKeyboard()
-      .text('📅 Срок: 14 дн.', 'set:thresh:expiry:14')
-      .text('📅 30 дн.', 'set:thresh:expiry:30')
-      .text('📅 60 дн.', 'set:thresh:expiry:60')
+      .text(ctx.t('settings.btn_thresh_expiry_14'), 'set:thresh:expiry:14')
+      .text(ctx.t('settings.btn_thresh_expiry_30'), 'set:thresh:expiry:30')
+      .text(ctx.t('settings.btn_thresh_expiry_60'), 'set:thresh:expiry:60')
       .row()
-      .text('📉 Остаток: 3', 'set:thresh:stock:3')
-      .text('📉 5', 'set:thresh:stock:5')
-      .text('📉 10', 'set:thresh:stock:10')
+      .text(ctx.t('settings.btn_thresh_stock_3'), 'set:thresh:stock:3')
+      .text(ctx.t('settings.btn_thresh_stock_5'), 'set:thresh:stock:5')
+      .text(ctx.t('settings.btn_thresh_stock_10'), 'set:thresh:stock:10')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -211,10 +211,10 @@ export function registerSettingsHandlers(bot) {
     await ctx.answerCallbackQuery();
     const period = ctx.match[1];
     const periodLabels = {
-      morning: '🌅 Утро',
-      afternoon: '☀️ День',
-      evening: '🌆 Вечер',
-      night: '🌙 Ночь',
+      morning: ctx.t('settings.btn_period_morning'),
+      afternoon: ctx.t('settings.btn_period_afternoon'),
+      evening: ctx.t('settings.btn_period_evening'),
+      night: ctx.t('settings.btn_period_night'),
     };
 
     const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
@@ -223,10 +223,10 @@ export function registerSettingsHandlers(bot) {
 
     // Set state for text input
     const msg = await ctx.editMessageText(
-      `${periodLabels[period]}\n\nТекущее время: *${currentValue}*\n\nВведите новое время в формате ЧЧ:ММ (например, 08:00):`,
+      ctx.t('settings.period_edit_prompt', { period: periodLabels[period], current: currentValue }),
       {
         parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:periods'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'set:periods'),
       }
     );
 
@@ -252,7 +252,7 @@ export function registerSettingsHandlers(bot) {
     s.digest.enabled = !s.digest.enabled;
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
-    await ctx.answerCallbackQuery(s.digest.enabled ? 'Дайджест включён' : 'Дайджест выключен');
+    await ctx.answerCallbackQuery(s.digest.enabled ? ctx.t('settings.digest_on_toast') : ctx.t('settings.digest_off_toast'));
     await showDigestMenu(ctx);
   });
 
@@ -262,10 +262,10 @@ export function registerSettingsHandlers(bot) {
     const digestTime = s.digest?.time || DEFAULT_SETTINGS.digest.time;
 
     const msg = await ctx.editMessageText(
-      `🕐 Время дайджеста\n\nТекущее время: *${digestTime}*\n\nВведите новое время в формате ЧЧ:ММ (например, 08:00):`,
+      ctx.t('settings.digest_time_prompt', { current: digestTime }),
       {
         parse_mode: 'Markdown',
-        reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:digest'),
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'set:digest'),
       }
     );
 
@@ -284,21 +284,21 @@ export function registerSettingsHandlers(bot) {
     const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
     const d = s.display || DEFAULT_SETTINGS.display;
 
-    const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${d.default_sort}*\n` +
-      `📅 Формат дат: *${d.date_format}*`;
+    const text = ctx.t('settings.display_title') +
+      ctx.t('settings.display_sort', { value: d.default_sort }) + '\n' +
+      ctx.t('settings.display_date', { value: d.date_format });
 
     const keyboard = new InlineKeyboard()
-      .text('По имени', 'set:disp:sort:name')
-      .text('По сроку', 'set:disp:sort:expiry')
+      .text(ctx.t('settings.btn_sort_name'), 'set:disp:sort:name')
+      .text(ctx.t('settings.btn_sort_expiry'), 'set:disp:sort:expiry')
       .row()
-      .text('По категории', 'set:disp:sort:category')
-      .text('По остатку', 'set:disp:sort:quantity')
+      .text(ctx.t('settings.btn_sort_category'), 'set:disp:sort:category')
+      .text(ctx.t('settings.btn_sort_quantity'), 'set:disp:sort:quantity')
       .row()
-      .text('ДД.ММ.ГГГГ', 'set:disp:date:DD.MM.YYYY')
-      .text('ГГГГ-ММ-ДД', 'set:disp:date:YYYY-MM-DD')
+      .text(ctx.t('settings.btn_date_ddmmyyyy'), 'set:disp:date:DD.MM.YYYY')
+      .text(ctx.t('settings.btn_date_yyyymmdd'), 'set:disp:date:YYYY-MM-DD')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
@@ -310,22 +310,22 @@ export function registerSettingsHandlers(bot) {
     s.display.default_sort = sort;
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
-    await ctx.answerCallbackQuery(`Сортировка: ${sort}`);
+    await ctx.answerCallbackQuery(ctx.t('settings.sort_toast', { value: sort }));
     const d = s.display;
-    const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${d.default_sort}*\n` +
-      `📅 Формат дат: *${d.date_format}*`;
+    const text = ctx.t('settings.display_title') +
+      ctx.t('settings.display_sort', { value: d.default_sort }) + '\n' +
+      ctx.t('settings.display_date', { value: d.date_format });
     const keyboard = new InlineKeyboard()
-      .text('По имени', 'set:disp:sort:name')
-      .text('По сроку', 'set:disp:sort:expiry')
+      .text(ctx.t('settings.btn_sort_name'), 'set:disp:sort:name')
+      .text(ctx.t('settings.btn_sort_expiry'), 'set:disp:sort:expiry')
       .row()
-      .text('По категории', 'set:disp:sort:category')
-      .text('По остатку', 'set:disp:sort:quantity')
+      .text(ctx.t('settings.btn_sort_category'), 'set:disp:sort:category')
+      .text(ctx.t('settings.btn_sort_quantity'), 'set:disp:sort:quantity')
       .row()
-      .text('ДД.ММ.ГГГГ', 'set:disp:date:DD.MM.YYYY')
-      .text('ГГГГ-ММ-ДД', 'set:disp:date:YYYY-MM-DD')
+      .text(ctx.t('settings.btn_date_ddmmyyyy'), 'set:disp:date:DD.MM.YYYY')
+      .text(ctx.t('settings.btn_date_yyyymmdd'), 'set:disp:date:YYYY-MM-DD')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -336,22 +336,22 @@ export function registerSettingsHandlers(bot) {
     s.display.date_format = fmt;
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
-    await ctx.answerCallbackQuery(`Формат: ${fmt}`);
+    await ctx.answerCallbackQuery(ctx.t('settings.date_toast', { value: fmt }));
     const d = s.display;
-    const text = `📋 *Отображение*\n\n` +
-      `🔀 Сортировка: *${d.default_sort}*\n` +
-      `📅 Формат дат: *${d.date_format}*`;
+    const text = ctx.t('settings.display_title') +
+      ctx.t('settings.display_sort', { value: d.default_sort }) + '\n' +
+      ctx.t('settings.display_date', { value: d.date_format });
     const keyboard = new InlineKeyboard()
-      .text('По имени', 'set:disp:sort:name')
-      .text('По сроку', 'set:disp:sort:expiry')
+      .text(ctx.t('settings.btn_sort_name'), 'set:disp:sort:name')
+      .text(ctx.t('settings.btn_sort_expiry'), 'set:disp:sort:expiry')
       .row()
-      .text('По категории', 'set:disp:sort:category')
-      .text('По остатку', 'set:disp:sort:quantity')
+      .text(ctx.t('settings.btn_sort_category'), 'set:disp:sort:category')
+      .text(ctx.t('settings.btn_sort_quantity'), 'set:disp:sort:quantity')
       .row()
-      .text('ДД.ММ.ГГГГ', 'set:disp:date:DD.MM.YYYY')
-      .text('ГГГГ-ММ-ДД', 'set:disp:date:YYYY-MM-DD')
+      .text(ctx.t('settings.btn_date_ddmmyyyy'), 'set:disp:date:DD.MM.YYYY')
+      .text(ctx.t('settings.btn_date_yyyymmdd'), 'set:disp:date:YYYY-MM-DD')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 }
@@ -361,20 +361,20 @@ async function showPeriodsMenu(ctx) {
   const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
   const dp = s.day_periods || DEFAULT_SETTINGS.day_periods;
 
-  const text = `🌅 *Время периодов дня*\n\n` +
-    `🌅 Утро: ${dp.morning}\n` +
-    `☀️ День: ${dp.afternoon}\n` +
-    `🌆 Вечер: ${dp.evening}\n` +
-    `🌙 Ночь: ${dp.night}`;
+  const text = ctx.t('settings.periods_title') +
+    ctx.t('settings.period_morning', { time: dp.morning }) + '\n' +
+    ctx.t('settings.period_afternoon', { time: dp.afternoon }) + '\n' +
+    ctx.t('settings.period_evening', { time: dp.evening }) + '\n' +
+    ctx.t('settings.period_night', { time: dp.night });
 
   const keyboard = new InlineKeyboard()
-    .text('🌅 Утро', 'set:period:morning')
-    .text('☀️ День', 'set:period:afternoon')
+    .text(ctx.t('settings.btn_period_morning'), 'set:period:morning')
+    .text(ctx.t('settings.btn_period_afternoon'), 'set:period:afternoon')
     .row()
-    .text('🌆 Вечер', 'set:period:evening')
-    .text('🌙 Ночь', 'set:period:night')
+    .text(ctx.t('settings.btn_period_evening'), 'set:period:evening')
+    .text(ctx.t('settings.btn_period_night'), 'set:period:night')
     .row()
-    .text('◀️ Назад', 'settings');
+    .text(ctx.t('common.back'), 'settings');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -384,16 +384,17 @@ async function showDigestMenu(ctx) {
   const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
   const dg = s.digest || DEFAULT_SETTINGS.digest;
 
-  const text = `📊 *Настройки дайджеста*\n\n` +
-    `Статус: ${dg.enabled ? '✅ Включён' : '❌ Выключен'}\n` +
-    `🕐 Время: ${dg.time || '08:00'}`;
+  const digestTime = dg.time || '08:00';
+  const text = ctx.t('settings.digest_title') +
+    (dg.enabled ? ctx.t('settings.digest_status_on') : ctx.t('settings.digest_status_off')) + '\n' +
+    ctx.t('settings.digest_time', { time: digestTime });
 
   const keyboard = new InlineKeyboard()
-    .text(dg.enabled ? '🔕 Выключить' : '🔔 Включить', 'set:digest:toggle')
+    .text(dg.enabled ? ctx.t('settings.btn_digest_off') : ctx.t('settings.btn_digest_on'), 'set:digest:toggle')
     .row()
-    .text(`🕐 Время: ${dg.time || '08:00'}`, 'set:digest:time')
+    .text(ctx.t('settings.btn_digest_time', { time: digestTime }), 'set:digest:time')
     .row()
-    .text('◀️ Назад', 'settings');
+    .text(ctx.t('common.back'), 'settings');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -407,10 +408,10 @@ export async function handleSettingsTextState(state, text, ctx) {
     const timeMatch = text.match(/^(\d{1,2}):(\d{2})$/);
     if (!timeMatch) {
       await ctx.api.editMessageText(ctx.chat.id, state.msgId,
-        '⚠️ Неверный формат. Введите время в формате ЧЧ:ММ (например, 08:00):',
+        ctx.t('settings.time_invalid'),
         {
           parse_mode: 'Markdown',
-          reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:periods'),
+          reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'set:periods'),
         }
       );
       return 'keep_state';
@@ -420,10 +421,10 @@ export async function handleSettingsTextState(state, text, ctx) {
     const minutes = parseInt(timeMatch[2]);
     if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
       await ctx.api.editMessageText(ctx.chat.id, state.msgId,
-        '⚠️ Некорректное время. Введите время в формате ЧЧ:ММ (например, 08:00):',
+        ctx.t('settings.time_invalid_range'),
         {
           parse_mode: 'Markdown',
-          reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:periods'),
+          reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'set:periods'),
         }
       );
       return 'keep_state';
@@ -437,29 +438,29 @@ export async function handleSettingsTextState(state, text, ctx) {
     ctx.dbUser.settings = s;
 
     const periodLabels = {
-      morning: '🌅 Утро',
-      afternoon: '☀️ День',
-      evening: '🌆 Вечер',
-      night: '🌙 Ночь',
+      morning: ctx.t('settings.btn_period_morning'),
+      afternoon: ctx.t('settings.btn_period_afternoon'),
+      evening: ctx.t('settings.btn_period_evening'),
+      night: ctx.t('settings.btn_period_night'),
     };
 
     // Show updated periods menu
     const dp = s.day_periods;
-    const menuText = `🌅 *Время периодов дня*\n\n` +
-      `🌅 Утро: ${dp.morning}\n` +
-      `☀️ День: ${dp.afternoon}\n` +
-      `🌆 Вечер: ${dp.evening}\n` +
-      `🌙 Ночь: ${dp.night}\n\n` +
-      `✅ ${periodLabels[state.period]} обновлено: ${timeStr}`;
+    const menuText = ctx.t('settings.periods_title') +
+      ctx.t('settings.period_morning', { time: dp.morning }) + '\n' +
+      ctx.t('settings.period_afternoon', { time: dp.afternoon }) + '\n' +
+      ctx.t('settings.period_evening', { time: dp.evening }) + '\n' +
+      ctx.t('settings.period_night', { time: dp.night }) + '\n\n' +
+      ctx.t('settings.period_updated', { period: periodLabels[state.period], time: timeStr });
 
     const keyboard = new InlineKeyboard()
-      .text('🌅 Утро', 'set:period:morning')
-      .text('☀️ День', 'set:period:afternoon')
+      .text(ctx.t('settings.btn_period_morning'), 'set:period:morning')
+      .text(ctx.t('settings.btn_period_afternoon'), 'set:period:afternoon')
       .row()
-      .text('🌆 Вечер', 'set:period:evening')
-      .text('🌙 Ночь', 'set:period:night')
+      .text(ctx.t('settings.btn_period_evening'), 'set:period:evening')
+      .text(ctx.t('settings.btn_period_night'), 'set:period:night')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
 
     await ctx.api.editMessageText(ctx.chat.id, state.msgId, menuText, {
       parse_mode: 'Markdown',
@@ -473,10 +474,10 @@ export async function handleSettingsTextState(state, text, ctx) {
     const timeMatch = text.match(/^(\d{1,2}):(\d{2})$/);
     if (!timeMatch) {
       await ctx.api.editMessageText(ctx.chat.id, state.msgId,
-        '⚠️ Неверный формат. Введите время в формате ЧЧ:ММ (например, 08:00):',
+        ctx.t('settings.time_invalid'),
         {
           parse_mode: 'Markdown',
-          reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:digest'),
+          reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'set:digest'),
         }
       );
       return 'keep_state';
@@ -486,10 +487,10 @@ export async function handleSettingsTextState(state, text, ctx) {
     const minutes = parseInt(timeMatch[2]);
     if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
       await ctx.api.editMessageText(ctx.chat.id, state.msgId,
-        '⚠️ Некорректное время. Введите время в формате ЧЧ:ММ (например, 08:00):',
+        ctx.t('settings.time_invalid_range'),
         {
           parse_mode: 'Markdown',
-          reply_markup: new InlineKeyboard().text('◀️ Отмена', 'set:digest'),
+          reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'set:digest'),
         }
       );
       return 'keep_state';
@@ -504,17 +505,17 @@ export async function handleSettingsTextState(state, text, ctx) {
 
     // Show updated digest menu
     const dg = s.digest;
-    const menuText = `📊 *Настройки дайджеста*\n\n` +
-      `Статус: ${dg.enabled ? '✅ Включён' : '❌ Выключен'}\n` +
-      `🕐 Время: ${dg.time}\n\n` +
-      `✅ Время дайджеста обновлено: ${timeStr}`;
+    const menuText = ctx.t('settings.digest_title') +
+      (dg.enabled ? ctx.t('settings.digest_status_on') : ctx.t('settings.digest_status_off')) + '\n' +
+      ctx.t('settings.digest_time', { time: dg.time }) + '\n\n' +
+      ctx.t('settings.digest_time_updated', { time: timeStr });
 
     const keyboard = new InlineKeyboard()
-      .text(dg.enabled ? '🔕 Выключить' : '🔔 Включить', 'set:digest:toggle')
+      .text(dg.enabled ? ctx.t('settings.btn_digest_off') : ctx.t('settings.btn_digest_on'), 'set:digest:toggle')
       .row()
-      .text(`🕐 Время: ${dg.time}`, 'set:digest:time')
+      .text(ctx.t('settings.btn_digest_time', { time: dg.time }), 'set:digest:time')
       .row()
-      .text('◀️ Назад', 'settings');
+      .text(ctx.t('common.back'), 'settings');
 
     await ctx.api.editMessageText(ctx.chat.id, state.msgId, menuText, {
       parse_mode: 'Markdown',

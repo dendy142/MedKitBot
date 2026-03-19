@@ -4,68 +4,60 @@ import { getMedicine } from '../db/queries/medicines.js';
 import { supabase } from '../db/supabase.js';
 import { formatQuantity } from '../utils/format.js';
 
-/**
- * Day of week labels (Russian, short)
- */
-const DAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const DAY_VALUES = [1, 2, 3, 4, 5, 6, 0]; // ISO weekday to JS day
 
 /**
- * Period labels
+ * Get day labels from i18n
  */
-const PERIOD_LABELS = {
-  morning: '🌅 Утро',
-  afternoon: '☀️ День',
-  evening: '🌆 Вечер',
-  night: '🌙 Ночь',
-};
+function getDayLabels(ctx) {
+  return ctx.t('schedule.days_short');
+}
 
 /**
- * Frequency labels
+ * Get period label from i18n
  */
-const FREQ_LABELS = {
-  daily: 'Ежедневно',
-  every_other_day: 'Через день',
-  weekly: 'По дням недели',
-};
+function getPeriodLabel(ctx, period) {
+  return ctx.t(`schedule.period_${period}`);
+}
 
 /**
- * Duration labels
+ * Get frequency label from i18n
  */
-const DURATION_LABELS = {
-  indefinite: '♾ Бессрочно',
-  days: 'дней',
-  until_date: 'до',
-};
+function getFreqLabel(ctx, freq) {
+  const map = { daily: 'freq_daily', every_other_day: 'freq_every_other_day', weekly: 'freq_weekly' };
+  return ctx.t(`schedule.${map[freq] || freq}`);
+}
 
 /**
  * Format schedule info for display
  */
-function formatScheduleInfo(sched) {
+function formatScheduleInfo(ctx, sched) {
+  const dayLabels = getDayLabels(ctx);
+
   let timeStr;
   if (sched.time_mode === 'exact') {
     timeStr = `🕐 ${sched.time_value}`;
   } else {
-    timeStr = PERIOD_LABELS[sched.time_value] || sched.time_value;
+    timeStr = getPeriodLabel(ctx, sched.time_value);
   }
 
-  let freqStr = FREQ_LABELS[sched.frequency] || sched.frequency;
+  let freqStr = getFreqLabel(ctx, sched.frequency);
   if (sched.frequency === 'weekly' && sched.frequency_days?.length > 0) {
-    const dayNames = sched.frequency_days.map(d => DAY_LABELS[DAY_VALUES.indexOf(d)] || d).join(', ');
+    const dayNames = sched.frequency_days.map(d => dayLabels[DAY_VALUES.indexOf(d)] || d).join(', ');
     freqStr += ` (${dayNames})`;
   }
 
   let durStr = '';
   if (sched.duration_type === 'indefinite') {
-    durStr = '♾ Бессрочно';
+    durStr = ctx.t('schedule.duration_indefinite');
   } else if (sched.duration_type === 'days') {
-    durStr = `📅 ${sched.duration_value} дней`;
+    durStr = ctx.t('schedule.duration_days', { count: sched.duration_value });
   } else if (sched.duration_type === 'until_date') {
     const d = new Date(sched.duration_value);
-    durStr = `📅 До ${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+    durStr = ctx.t('schedule.duration_until', { date: `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}` });
   }
 
-  const statusEmoji = sched.status === 'active' ? '▶️' : '⏸';
+  const statusEmoji = sched.status === 'active' ? ctx.t('schedule.status_active') : ctx.t('schedule.status_paused');
 
   return { timeStr, freqStr, durStr, statusEmoji };
 }
@@ -76,38 +68,38 @@ function formatScheduleInfo(sched) {
 async function showScheduleList(ctx, medId) {
   const med = await getMedicine(medId);
   if (!med) {
-    if (ctx.callbackQuery) await ctx.answerCallbackQuery('Лекарство не найдено');
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery(ctx.t('medicine.not_found'));
     return;
   }
 
   const schedules = await getMedicineSchedules(medId);
   const keyboard = new InlineKeyboard();
 
-  let text = `📆 *Курсы приёма: ${med.name}*\n`;
-  text += `📏 Остаток: ${formatQuantity(med.quantity, med.quantity_unit)}\n\n`;
+  let text = ctx.t('schedule.list_title', { name: med.name }) + '\n';
+  text += ctx.t('schedule.list_remainder', { quantity: formatQuantity(med.quantity, med.quantity_unit) }) + '\n\n';
 
   if (schedules.length === 0) {
-    text += 'Нет активных курсов.\n';
+    text += ctx.t('schedule.list_empty');
   } else {
     for (const sched of schedules) {
-      const { timeStr, freqStr, durStr, statusEmoji } = formatScheduleInfo(sched);
+      const { timeStr, freqStr, durStr, statusEmoji } = formatScheduleInfo(ctx, sched);
       text += `${statusEmoji} ${timeStr} | ${sched.dose_per_intake} ${med.quantity_unit}\n`;
       text += `   ${freqStr} | ${durStr}\n\n`;
 
       // Pause/resume button
       if (sched.status === 'active') {
-        keyboard.text('⏸ Пауза', `sched:${sched.id}:pause`);
+        keyboard.text(ctx.t('schedule.btn_pause'), `sched:${sched.id}:pause`);
       } else if (sched.status === 'paused') {
-        keyboard.text('▶️ Возобн.', `sched:${sched.id}:resume`);
+        keyboard.text(ctx.t('schedule.btn_resume'), `sched:${sched.id}:resume`);
       }
       keyboard.text('🗑', `sched:${sched.id}:del`);
       keyboard.row();
     }
   }
 
-  keyboard.text('➕ Добавить курс', `sched:${medId}:create`);
+  keyboard.text(ctx.t('schedule.btn_add'), `sched:${medId}:create`);
   keyboard.row();
-  keyboard.text('◀️ Назад', `med:${medId}`);
+  keyboard.text(ctx.t('common.back'), `med:${medId}`);
 
   await ctx.editMessageText(text, {
     parse_mode: 'Markdown',
@@ -155,40 +147,42 @@ async function showConfirmation(ctx, state, msgId) {
   const med = await getMedicine(state.medId);
   if (!med) return;
 
+  const dayLabels = getDayLabels(ctx);
+
   let timeStr;
   if (state.timeMode === 'exact') {
     timeStr = `🕐 ${state.timeValue}`;
   } else {
-    timeStr = PERIOD_LABELS[state.timeValue] || state.timeValue;
+    timeStr = getPeriodLabel(ctx, state.timeValue);
   }
 
-  let freqStr = FREQ_LABELS[state.frequency] || state.frequency;
+  let freqStr = getFreqLabel(ctx, state.frequency);
   if (state.frequency === 'weekly' && state.frequencyDays?.length > 0) {
-    const dayNames = state.frequencyDays.map(d => DAY_LABELS[DAY_VALUES.indexOf(d)] || d).join(', ');
+    const dayNames = state.frequencyDays.map(d => dayLabels[DAY_VALUES.indexOf(d)] || d).join(', ');
     freqStr += ` (${dayNames})`;
   }
 
   let durStr = '';
   if (state.durationType === 'indefinite') {
-    durStr = '♾ Бессрочно';
+    durStr = ctx.t('schedule.duration_indefinite');
   } else if (state.durationType === 'days') {
-    durStr = `📅 ${state.durationValue} дней`;
+    durStr = ctx.t('schedule.duration_days', { count: state.durationValue });
   } else if (state.durationType === 'until_date') {
-    durStr = `📅 До ${state.durationValue}`;
+    durStr = ctx.t('schedule.duration_until', { date: state.durationValue });
   }
 
   const text =
-    `📋 *Подтверждение курса*\n\n` +
+    ctx.t('schedule.confirm_title') +
     `💊 ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n` +
     `⏰ ${timeStr}\n` +
-    `💊 Доза: ${state.dosePerIntake} ${med.quantity_unit}\n` +
+    ctx.t('schedule.confirm_dose', { dose: state.dosePerIntake, unit: med.quantity_unit }) + '\n' +
     `🔄 ${freqStr}\n` +
     `📅 ${durStr}\n\n` +
-    `Всё верно?`;
+    ctx.t('schedule.confirm_ok');
 
   const keyboard = new InlineKeyboard()
-    .text('✅ Создать', 'sched:confirm:yes')
-    .text('❌ Отмена', `med:${state.medId}:schedule`);
+    .text(ctx.t('schedule.btn_create'), 'sched:confirm:yes')
+    .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`);
 
   if (ctx.callbackQuery) {
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -222,11 +216,11 @@ export async function handleScheduleText(ctx) {
     const timeMatch = text.match(/^(\d{1,2}):(\d{2})$/);
     if (!timeMatch) {
       await ctx.api.editMessageText(chatId, msgId,
-        '⚠️ Неверный формат. Введите время в формате ЧЧ:ММ (например, 08:30):',
+        ctx.t('schedule.time_invalid'),
         {
           reply_markup: new InlineKeyboard()
-            .text('◀️ Назад', `sched:${state.medId}:create`)
-            .text('❌ Отмена', `med:${state.medId}:schedule`),
+            .text(ctx.t('common.back'), `sched:${state.medId}:create`)
+            .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
         }
       );
       return true;
@@ -236,11 +230,11 @@ export async function handleScheduleText(ctx) {
     const minutes = parseInt(timeMatch[2], 10);
     if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
       await ctx.api.editMessageText(chatId, msgId,
-        '⚠️ Некорректное время. Введите в формате ЧЧ:ММ:',
+        ctx.t('schedule.time_invalid_range'),
         {
           reply_markup: new InlineKeyboard()
-            .text('◀️ Назад', `sched:${state.medId}:create`)
-            .text('❌ Отмена', `med:${state.medId}:schedule`),
+            .text(ctx.t('common.back'), `sched:${state.medId}:create`)
+            .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
         }
       );
       return true;
@@ -254,7 +248,7 @@ export async function handleScheduleText(ctx) {
 
     const med = await getMedicine(state.medId);
     await ctx.api.editMessageText(chatId, msgId,
-      `💊 *Доза за приём*\n\nЛекарство: ${med?.name || '?'}\nВремя: ${timeValue}\n\nВведите количество (${med?.quantity_unit || 'шт'}) за один приём:`,
+      ctx.t('schedule.dose_prompt', { name: med?.name || '?', time: timeValue, unit: med?.quantity_unit || ctx.t('intake.default_unit') }),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
@@ -262,7 +256,7 @@ export async function handleScheduleText(ctx) {
           .text('2', 'sched:dose:2')
           .text('3', 'sched:dose:3')
           .row()
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
     return true;
@@ -273,14 +267,14 @@ export async function handleScheduleText(ctx) {
     const num = parseFloat(text);
     if (isNaN(num) || num <= 0) {
       await ctx.api.editMessageText(chatId, msgId,
-        '⚠️ Введите положительное число:',
+        ctx.t('schedule.dose_invalid_positive'),
         {
           reply_markup: new InlineKeyboard()
             .text('1', 'sched:dose:1')
             .text('2', 'sched:dose:2')
             .text('3', 'sched:dose:3')
             .row()
-            .text('❌ Отмена', `med:${state.medId}:schedule`),
+            .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
         }
       );
       return true;
@@ -290,17 +284,17 @@ export async function handleScheduleText(ctx) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.api.editMessageText(chatId, msgId,
-      '🔄 *Частота приёма:*',
+      ctx.t('schedule.freq_prompt'),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('Ежедневно', 'sched:freq:daily')
+          .text(ctx.t('schedule.btn_freq_daily'), 'sched:freq:daily')
           .row()
-          .text('Через день', 'sched:freq:every_other_day')
+          .text(ctx.t('schedule.btn_freq_every_other'), 'sched:freq:every_other_day')
           .row()
-          .text('По дням недели', 'sched:freq:weekly')
+          .text(ctx.t('schedule.btn_freq_weekly'), 'sched:freq:weekly')
           .row()
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
     return true;
@@ -311,10 +305,10 @@ export async function handleScheduleText(ctx) {
     const num = parseInt(text, 10);
     if (isNaN(num) || num <= 0) {
       await ctx.api.editMessageText(chatId, msgId,
-        '⚠️ Введите положительное целое число дней:',
+        ctx.t('schedule.dur_days_invalid_int'),
         {
           reply_markup: new InlineKeyboard()
-            .text('❌ Отмена', `med:${state.medId}:schedule`),
+            .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
         }
       );
       return true;
@@ -331,10 +325,10 @@ export async function handleScheduleText(ctx) {
     const dateMatch = text.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
     if (!dateMatch) {
       await ctx.api.editMessageText(chatId, msgId,
-        '⚠️ Введите дату в формате ДД.ММ.ГГГГ:',
+        ctx.t('schedule.dur_date_invalid_format'),
         {
           reply_markup: new InlineKeyboard()
-            .text('❌ Отмена', `med:${state.medId}:schedule`),
+            .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
         }
       );
       return true;
@@ -344,10 +338,10 @@ export async function handleScheduleText(ctx) {
     const d = new Date(Number(year), Number(month) - 1, Number(day));
     if (isNaN(d.getTime()) || d <= new Date()) {
       await ctx.api.editMessageText(chatId, msgId,
-        '⚠️ Дата должна быть в будущем. Введите в формате ДД.ММ.ГГГГ:',
+        ctx.t('schedule.dur_date_future'),
         {
           reply_markup: new InlineKeyboard()
-            .text('❌ Отмена', `med:${state.medId}:schedule`),
+            .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
         }
       );
       return true;
@@ -387,15 +381,15 @@ export function registerScheduleHandlers(bot) {
     });
 
     await ctx.editMessageText(
-      '⏰ *Когда принимать?*\n\nВыберите режим:',
+      ctx.t('schedule.time_mode_prompt'),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('🕐 Точное время', 'sched:time:exact')
-          .text('🌅 Период дня', 'sched:time:period')
+          .text(ctx.t('schedule.btn_time_exact'), 'sched:time:exact')
+          .text(ctx.t('schedule.btn_time_period'), 'sched:time:period')
           .row()
-          .text('◀️ Назад', `med:${medId}:schedule`)
-          .text('❌ Отмена', `med:${medId}`),
+          .text(ctx.t('common.back'), `med:${medId}:schedule`)
+          .text(ctx.t('common.cancel'), `med:${medId}`),
       }
     );
   });
@@ -410,11 +404,11 @@ export function registerScheduleHandlers(bot) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.editMessageText(
-      '🕐 Введите время в формате ЧЧ:ММ (например, 08:30):',
+      ctx.t('schedule.time_prompt'),
       {
         reply_markup: new InlineKeyboard()
-          .text('◀️ Назад', `sched:${state.medId}:create`)
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.back'), `sched:${state.medId}:create`)
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
   });
@@ -429,17 +423,17 @@ export function registerScheduleHandlers(bot) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.editMessageText(
-      '🌅 Выберите период дня:',
+      ctx.t('schedule.period_select_prompt'),
       {
         reply_markup: new InlineKeyboard()
-          .text('🌅 Утро', 'sched:period:morning')
-          .text('☀️ День', 'sched:period:afternoon')
+          .text(ctx.t('schedule.period_morning'), 'sched:period:morning')
+          .text(ctx.t('schedule.period_afternoon'), 'sched:period:afternoon')
           .row()
-          .text('🌆 Вечер', 'sched:period:evening')
-          .text('🌙 Ночь', 'sched:period:night')
+          .text(ctx.t('schedule.period_evening'), 'sched:period:evening')
+          .text(ctx.t('schedule.period_night'), 'sched:period:night')
           .row()
-          .text('◀️ Назад', `sched:${state.medId}:create`)
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.back'), `sched:${state.medId}:create`)
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
   });
@@ -456,7 +450,7 @@ export function registerScheduleHandlers(bot) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.editMessageText(
-      `💊 *Доза за приём*\n\nЛекарство: ${med?.name || '?'}\nВремя: ${PERIOD_LABELS[period]}\n\nВведите количество (${med?.quantity_unit || 'шт'}) за один приём:`,
+      ctx.t('schedule.dose_prompt', { name: med?.name || '?', time: getPeriodLabel(ctx, period), unit: med?.quantity_unit || ctx.t('intake.default_unit') }),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
@@ -464,7 +458,7 @@ export function registerScheduleHandlers(bot) {
           .text('2', 'sched:dose:2')
           .text('3', 'sched:dose:3')
           .row()
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
   });
@@ -480,17 +474,17 @@ export function registerScheduleHandlers(bot) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.editMessageText(
-      '🔄 *Частота приёма:*',
+      ctx.t('schedule.freq_prompt'),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('Ежедневно', 'sched:freq:daily')
+          .text(ctx.t('schedule.btn_freq_daily'), 'sched:freq:daily')
           .row()
-          .text('Через день', 'sched:freq:every_other_day')
+          .text(ctx.t('schedule.btn_freq_every_other'), 'sched:freq:every_other_day')
           .row()
-          .text('По дням недели', 'sched:freq:weekly')
+          .text(ctx.t('schedule.btn_freq_weekly'), 'sched:freq:weekly')
           .row()
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
   });
@@ -506,16 +500,16 @@ export function registerScheduleHandlers(bot) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.editMessageText(
-      '📅 *Длительность курса:*',
+      ctx.t('schedule.duration_prompt_bold'),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('♾ Бессрочно', 'sched:dur:indefinite')
+          .text(ctx.t('schedule.btn_dur_indefinite'), 'sched:dur:indefinite')
           .row()
-          .text('📅 N дней', 'sched:dur:days')
-          .text('📅 До даты', 'sched:dur:until_date')
+          .text(ctx.t('schedule.btn_dur_n_days'), 'sched:dur:days')
+          .text(ctx.t('schedule.btn_dur_until_date'), 'sched:dur:until_date')
           .row()
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
   });
@@ -562,7 +556,7 @@ export function registerScheduleHandlers(bot) {
     if (!state || state.action !== 'create_schedule') return;
 
     if (!state.frequencyDays || state.frequencyDays.length === 0) {
-      await ctx.answerCallbackQuery('Выберите хотя бы один день');
+      await ctx.answerCallbackQuery(ctx.t('schedule.days_select_one'));
       return;
     }
 
@@ -571,16 +565,16 @@ export function registerScheduleHandlers(bot) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.editMessageText(
-      '📅 *Длительность курса:*',
+      ctx.t('schedule.duration_prompt_bold'),
       {
         parse_mode: 'Markdown',
         reply_markup: new InlineKeyboard()
-          .text('♾ Бессрочно', 'sched:dur:indefinite')
+          .text(ctx.t('schedule.btn_dur_indefinite'), 'sched:dur:indefinite')
           .row()
-          .text('📅 N дней', 'sched:dur:days')
-          .text('📅 До даты', 'sched:dur:until_date')
+          .text(ctx.t('schedule.btn_dur_n_days'), 'sched:dur:days')
+          .text(ctx.t('schedule.btn_dur_until_date'), 'sched:dur:until_date')
           .row()
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
   });
@@ -606,14 +600,14 @@ export function registerScheduleHandlers(bot) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.editMessageText(
-      '📅 Введите количество дней курса:',
+      ctx.t('schedule.dur_days_prompt'),
       {
         reply_markup: new InlineKeyboard()
           .text('7', 'sched:durdays:7')
           .text('14', 'sched:durdays:14')
           .text('30', 'sched:durdays:30')
           .row()
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
   });
@@ -640,10 +634,10 @@ export function registerScheduleHandlers(bot) {
     await saveWizardState(ctx.dbUser.id, newState);
 
     await ctx.editMessageText(
-      '📅 Введите дату окончания курса в формате ДД.ММ.ГГГГ:',
+      ctx.t('schedule.dur_date_prompt'),
       {
         reply_markup: new InlineKeyboard()
-          .text('❌ Отмена', `med:${state.medId}:schedule`),
+          .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
       }
     );
   });
@@ -671,19 +665,19 @@ export function registerScheduleHandlers(bot) {
       await clearWizardState(ctx.dbUser.id);
 
       await ctx.editMessageText(
-        '✅ Курс приёма создан!',
+        ctx.t('schedule.created_toast'),
         {
           reply_markup: new InlineKeyboard()
-            .text('📆 К курсам', `med:${state.medId}:schedule`)
-            .text('◀️ К лекарству', `med:${state.medId}`),
+            .text(ctx.t('schedule.btn_to_schedules'), `med:${state.medId}:schedule`)
+            .text(ctx.t('schedule.btn_to_medicine'), `med:${state.medId}`),
         }
       );
     } catch (e) {
       console.error('Error creating schedule:', e);
       await ctx.editMessageText(
-        '❌ Ошибка при создании курса.',
+        ctx.t('schedule.create_error'),
         {
-          reply_markup: new InlineKeyboard().text('◀️ Назад', `med:${state.medId}:schedule`),
+          reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:schedule`),
         }
       );
     }
@@ -698,7 +692,7 @@ export function registerScheduleHandlers(bot) {
       await showScheduleList(ctx, sched.medicine_id);
     } catch (e) {
       console.error('Error pausing schedule:', e);
-      await ctx.answerCallbackQuery('Ошибка');
+      await ctx.answerCallbackQuery(ctx.t('schedule.error_generic'));
     }
   });
 
@@ -711,7 +705,7 @@ export function registerScheduleHandlers(bot) {
       await showScheduleList(ctx, sched.medicine_id);
     } catch (e) {
       console.error('Error resuming schedule:', e);
-      await ctx.answerCallbackQuery('Ошибка');
+      await ctx.answerCallbackQuery(ctx.t('schedule.error_generic'));
     }
   });
 
@@ -723,11 +717,11 @@ export function registerScheduleHandlers(bot) {
     if (!sched) return;
 
     await ctx.editMessageText(
-      `🗑 Удалить курс приёма?`,
+      ctx.t('schedule.delete_confirm'),
       {
         reply_markup: new InlineKeyboard()
-          .text('✅ Да, удалить', `sched:${schedId}:del:confirm`)
-          .text('❌ Нет', `med:${sched.medicine_id}:schedule`),
+          .text(ctx.t('common.yes_delete'), `sched:${schedId}:del:confirm`)
+          .text(ctx.t('common.no'), `med:${sched.medicine_id}:schedule`),
       }
     );
   });
@@ -740,18 +734,18 @@ export function registerScheduleHandlers(bot) {
 
     try {
       await deleteSchedule(schedId);
-      await ctx.answerCallbackQuery('Курс удалён');
+      await ctx.answerCallbackQuery(ctx.t('schedule.delete_toast'));
     } catch (e) {
       console.error('Error deleting schedule:', e);
-      await ctx.answerCallbackQuery('Ошибка');
+      await ctx.answerCallbackQuery(ctx.t('schedule.error_generic'));
       return;
     }
 
     if (medId) {
       await showScheduleList(ctx, medId);
     } else {
-      await ctx.editMessageText('✅ Курс удалён.', {
-        reply_markup: new InlineKeyboard().text('◀️ Назад', 'main_menu'),
+      await ctx.editMessageText(ctx.t('schedule.delete_done'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'main_menu'),
       });
     }
   });
@@ -761,12 +755,13 @@ export function registerScheduleHandlers(bot) {
  * Show weekly day multi-selector
  */
 async function showWeeklyDaySelector(ctx, selectedDays) {
+  const dayLabels = getDayLabels(ctx);
   const keyboard = new InlineKeyboard();
 
   // Row 1: Mon-Thu
   for (let i = 0; i < 4; i++) {
     const dayVal = DAY_VALUES[i];
-    const label = selectedDays.includes(dayVal) ? `✅ ${DAY_LABELS[i]}` : DAY_LABELS[i];
+    const label = selectedDays.includes(dayVal) ? `✅ ${dayLabels[i]}` : dayLabels[i];
     keyboard.text(label, `sched:day:${dayVal}`);
   }
   keyboard.row();
@@ -774,23 +769,23 @@ async function showWeeklyDaySelector(ctx, selectedDays) {
   // Row 2: Fri-Sun
   for (let i = 4; i < 7; i++) {
     const dayVal = DAY_VALUES[i];
-    const label = selectedDays.includes(dayVal) ? `✅ ${DAY_LABELS[i]}` : DAY_LABELS[i];
+    const label = selectedDays.includes(dayVal) ? `✅ ${dayLabels[i]}` : dayLabels[i];
     keyboard.text(label, `sched:day:${dayVal}`);
   }
   keyboard.row();
 
-  keyboard.text('✅ Готово', 'sched:days:done');
+  keyboard.text(ctx.t('common.done'), 'sched:days:done');
   keyboard.row();
 
   const state = await getWizardState(ctx.dbUser.id);
-  keyboard.text('❌ Отмена', `med:${state?.medId}:schedule`);
+  keyboard.text(ctx.t('common.cancel'), `med:${state?.medId}:schedule`);
 
   const selectedStr = selectedDays.length > 0
-    ? selectedDays.map(d => DAY_LABELS[DAY_VALUES.indexOf(d)]).join(', ')
-    : 'ничего не выбрано';
+    ? selectedDays.map(d => dayLabels[DAY_VALUES.indexOf(d)]).join(', ')
+    : ctx.t('schedule.days_none');
 
   await ctx.editMessageText(
-    `📅 *Выберите дни недели:*\n\nВыбрано: ${selectedStr}`,
+    ctx.t('schedule.days_prompt', { selected: selectedStr }),
     {
       parse_mode: 'Markdown',
       reply_markup: keyboard,

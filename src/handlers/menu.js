@@ -7,7 +7,7 @@ import { supabase } from '../db/supabase.js';
 /**
  * Build dashboard text for main menu
  */
-async function buildDashboard(userId, settings) {
+async function buildDashboard(userId, settings, t) {
   const medkits = await getUserMedkits(userId);
   const medkitCount = medkits.length;
   const shopCount = await countShoppingItems(userId);
@@ -46,14 +46,14 @@ async function buildDashboard(userId, settings) {
   const totalIntakes = intakeLogs.length;
   const doneIntakes = intakeLogs.filter(l => l.status === 'taken').length;
 
-  let text = `👋 *Главное меню*\n\n`;
-  text += `📦 Аптечек: ${medkitCount}\n`;
+  let text = t('menu.title');
+  text += t('menu.medkits_count', { count: medkitCount }) + '\n';
   if (totalIntakes > 0) {
-    text += `💊 Приём: ${doneIntakes}/${totalIntakes} выполнено\n`;
+    text += t('menu.intake_today', { taken: doneIntakes, total: totalIntakes }) + '\n';
   }
-  if (expiringCount > 0) text += `⚠️ Истекает скоро: ${expiringCount}\n`;
-  if (lowStockCount > 0) text += `📉 Заканчивается: ${lowStockCount}\n`;
-  if (shopCount > 0) text += `🛒 В списке покупок: ${shopCount}\n`;
+  if (expiringCount > 0) text += t('menu.expiring_soon', { count: expiringCount }) + '\n';
+  if (lowStockCount > 0) text += t('menu.low_stock', { count: lowStockCount }) + '\n';
+  if (shopCount > 0) text += t('menu.shopping_count', { count: shopCount }) + '\n';
 
   return text;
 }
@@ -62,10 +62,10 @@ async function buildDashboard(userId, settings) {
  * Send main menu (new message)
  */
 export async function handleMainMenu(ctx) {
-  const text = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings);
+  const text = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings, ctx.t);
   await ctx.reply(text, {
     parse_mode: 'Markdown',
-    reply_markup: mainMenuKeyboard(),
+    reply_markup: mainMenuKeyboard(ctx.t),
   });
 }
 
@@ -74,9 +74,9 @@ export async function handleMainMenu(ctx) {
  */
 export async function handleMainMenuCallback(ctx) {
   await ctx.answerCallbackQuery();
-  const text = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings);
+  const text = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings, ctx.t);
   await ctx.editMessageText(text, {
     parse_mode: 'Markdown',
-    reply_markup: mainMenuKeyboard(),
+    reply_markup: mainMenuKeyboard(ctx.t),
   });
 }

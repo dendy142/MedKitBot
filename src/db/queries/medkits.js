@@ -55,22 +55,14 @@ export async function getUserMedkits(userId) {
 export async function getMedkit(medkitId, userId) {
   const { data: member } = await supabase
     .from('medkit_members')
-    .select('role')
+    .select('role, medkit:medkits(*)')
     .eq('medkit_id', medkitId)
     .eq('user_id', userId)
     .single();
 
-  if (!member) return null;
+  if (!member || !member.medkit) return null;
 
-  const { data: medkit } = await supabase
-    .from('medkits')
-    .select('*')
-    .eq('id', medkitId)
-    .single();
-
-  if (!medkit) return null;
-
-  return { ...medkit, role: member.role };
+  return { ...member.medkit, role: member.role };
 }
 
 /**

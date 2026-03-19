@@ -49,7 +49,7 @@ export function authMiddleware() {
       if (user.username !== ctx.from.username) updates.username = ctx.from.username || null;
       if (user.first_name !== ctx.from.first_name) updates.first_name = ctx.from.first_name || null;
 
-      const [memberResult] = await Promise.all([
+      const promises = [
         // Check if user completed onboarding (has at least one medkit)
         supabase
           .from('medkit_members')
@@ -60,9 +60,12 @@ export function authMiddleware() {
           .from('users')
           .update(updates)
           .eq('id', user.id),
-        // #66 Session timeout — check and clean expired sessions
-        cleanExpiredSessions(user.id),
-      ]);
+      ];
+      // #66 Session cleanup — run probabilistically (~5% of requests) to avoid unnecessary DB call
+      if (Math.random() < 0.05) {
+        promises.push(cleanExpiredSessions(user.id));
+      }
+      const [memberResult] = await Promise.all(promises);
       ctx.isNewUser = memberResult.count === 0;
     }
 

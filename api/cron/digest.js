@@ -108,79 +108,82 @@ export default async function handler(req, res) {
 
         const parts = [];
 
-        // Intakes count
-        if (include.includes('intakes')) {
-          const startOfDay = `${todayStr}T00:00:00`;
-          const endOfDay = `${todayStr}T23:59:59`;
-          const { count: intakeCount } = await supabase
-            .from('intake_logs')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', user.id)
-            .gte('planned_at', startOfDay)
-            .lte('planned_at', endOfDay);
-          if (intakeCount > 0) {
-            parts.push(t('cron.digest_intakes', lang, { count: intakeCount }));
-          }
-        }
-
-        // Expiring medicines
-        if (include.includes('expiry')) {
-          const thresholdDate = new Date(now.getTime() + thresholds.expiry_days * 86400000);
-
+        // Fetch memberships once (needed for expiry + low_stock)
+        const needsMedkits = include.includes('expiry') || include.includes('low_stock');
+        let medkitIds = [];
+        if (needsMedkits) {
           const { data: memberships } = await supabase
             .from('medkit_members')
             .select('medkit_id')
             .eq('user_id', user.id);
+          medkitIds = (memberships || []).map(m => m.medkit_id);
+        }
 
-          if (memberships && memberships.length > 0) {
-            const medkitIds = memberships.map(m => m.medkit_id);
-            const { count: expiryCount } = await supabase
-              .from('medicines')
-              .select('*', { count: 'exact', head: true })
+        // Build all digest count queries in parallel
+        const digestQueries = [];
+        const queryKeys = [];
+
+        if (include.includes('intakes')) {
+          queryKeys.push('intakes');
+          digestQueries.push(
+            supabase.from('intake_logs').select('*', { count: 'exact', head: true })
+              .eq('user_id', user.id)
+              .gte('planned_at', `${todayStr}T00:00:00`)
+              .lte('planned_at', `${todayStr}T23:59:59`)
+          );
+        }
+
+        if (include.includes('expiry') && medkitIds.length > 0) {
+          const thresholdDate = new Date(now.getTime() + thresholds.expiry_days * 86400000);
+          queryKeys.push('expiry');
+          digestQueries.push(
+            supabase.from('medicines').select('*', { count: 'exact', head: true })
               .in('medkit_id', medkitIds)
               .eq('is_archived', false)
               .not('expiry_date', 'is', null)
-              .lte('expiry_date', thresholdDate.toISOString().split('T')[0]);
-            if (expiryCount > 0) {
-              const word = pluralize(expiryCount, t('cron.med_1', lang), t('cron.med_2', lang), t('cron.med_5', lang));
-              parts.push(t('cron.digest_expiring', lang, { count: expiryCount, word }));
-            }
-          }
+              .lte('expiry_date', thresholdDate.toISOString().split('T')[0])
+          );
         }
 
-        // Low stock
-        if (include.includes('low_stock')) {
-          const { data: memberships } = await supabase
-            .from('medkit_members')
-            .select('medkit_id')
-            .eq('user_id', user.id);
-
-          if (memberships && memberships.length > 0) {
-            const medkitIds = memberships.map(m => m.medkit_id);
-            const { count: lowCount } = await supabase
-              .from('medicines')
-              .select('*', { count: 'exact', head: true })
+        if (include.includes('low_stock') && medkitIds.length > 0) {
+          queryKeys.push('low_stock');
+          digestQueries.push(
+            supabase.from('medicines').select('*', { count: 'exact', head: true })
               .in('medkit_id', medkitIds)
               .eq('is_archived', false)
               .lte('quantity', thresholds.low_stock_count)
-              .gt('quantity', 0);
-            if (lowCount > 0) {
-              const word = pluralize(lowCount, t('cron.med_1', lang), t('cron.med_2', lang), t('cron.med_5', lang));
-              parts.push(t('cron.digest_low', lang, { count: lowCount, word }));
-            }
-          }
+              .gt('quantity', 0)
+          );
         }
 
-        // Shopping list
         if (include.includes('shopping')) {
-          const { count: shopCount } = await supabase
-            .from('shopping_list')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', user.id)
-            .eq('is_bought', false);
-          if (shopCount > 0) {
-            parts.push(t('cron.digest_shopping', lang, { count: shopCount }));
-          }
+          queryKeys.push('shopping');
+          digestQueries.push(
+            supabase.from('shopping_list').select('*', { count: 'exact', head: true })
+              .eq('user_id', user.id)
+              .eq('is_bought', false)
+          );
+        }
+
+        const digestResults = await Promise.all(digestQueries);
+        const counts = {};
+        for (let i = 0; i < queryKeys.length; i++) {
+          counts[queryKeys[i]] = digestResults[i].count || 0;
+        }
+
+        if (counts.intakes > 0) {
+          parts.push(t('cron.digest_intakes', lang, { count: counts.intakes }));
+        }
+        if (counts.expiry > 0) {
+          const word = pluralize(counts.expiry, t('cron.med_1', lang), t('cron.med_2', lang), t('cron.med_5', lang));
+          parts.push(t('cron.digest_expiring', lang, { count: counts.expiry, word }));
+        }
+        if (counts.low_stock > 0) {
+          const word = pluralize(counts.low_stock, t('cron.med_1', lang), t('cron.med_2', lang), t('cron.med_5', lang));
+          parts.push(t('cron.digest_low', lang, { count: counts.low_stock, word }));
+        }
+        if (counts.shopping > 0) {
+          parts.push(t('cron.digest_shopping', lang, { count: counts.shopping }));
         }
 
         // Skip if nothing to report

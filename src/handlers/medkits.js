@@ -581,9 +581,7 @@ export function registerMedkitHandlers(bot) {
     const state = session.value;
     const targetMedkit = await getMedkit(targetMedkitId, ctx.dbUser.id);
     if (!targetMedkit) return;
-    for (const medId of state.selected) {
-      await supabase.from('medicines').update({ medkit_id: targetMedkitId }).eq('id', medId);
-    }
+    await supabase.from('medicines').update({ medkit_id: targetMedkitId }).in('id', state.selected);
     await supabase.from('sessions').delete().eq('key', `multiselect:${ctx.dbUser.id}`);
     await ctx.editMessageText(
       ctx.t('medkit.multiselect_move_done', { count: state.selected.length, target: targetMedkit.name }),
@@ -623,9 +621,7 @@ export function registerMedkitHandlers(bot) {
     if (!session?.value) return;
     await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     const state = session.value;
-    for (const medId of state.selected) {
-      await supabase.from('medicines').update({ is_archived: true }).eq('id', medId);
-    }
+    await supabase.from('medicines').update({ is_archived: true }).in('id', state.selected);
     await supabase.from('sessions').delete().eq('key', `multiselect:${ctx.dbUser.id}`);
     await ctx.editMessageText(
       ctx.t('medkit.multiselect_archive_done', { count: state.selected.length }),
@@ -665,9 +661,7 @@ export function registerMedkitHandlers(bot) {
     if (!session?.value) return;
     await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     const state = session.value;
-    for (const medId of state.selected) {
-      await supabase.from('medicines').delete().eq('id', medId);
-    }
+    await supabase.from('medicines').delete().in('id', state.selected);
     await supabase.from('sessions').delete().eq('key', `multiselect:${ctx.dbUser.id}`);
     await ctx.editMessageText(
       ctx.t('medkit.multiselect_delete_done', { count: state.selected.length }),

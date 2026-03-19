@@ -2,9 +2,11 @@ import { InlineKeyboard } from 'grammy';
 import { CATEGORIES, CATEGORY_KEYWORDS, DOSAGE_UNITS, QUANTITY_UNITS, MAX_PHOTOS } from '../config.js';
 import { createMedicine } from '../db/queries/medicines.js';
 import { getMedkit, getUserMedkits } from '../db/queries/medkits.js';
-import { formatDate, formatQuantity } from '../utils/format.js';
+import { formatDate, formatQuantity, sanitize, validateQuantity } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
+import { withRetry } from '../utils/retry.js';
 import { supabase } from '../db/supabase.js';
+import { checkAchievements } from './achievements.js';
 
 async function getState(userId) {
   const { data } = await supabase
@@ -127,7 +129,18 @@ export async function handleAddMedicineText(ctx) {
   await deleteUserMsg(ctx);
 
   if (step === 'name') {
-    state.data.name = text;
+    // #69 Sanitize name input
+    const sanitizedName = sanitize(text, 100);
+    if (!sanitizedName) {
+      await editBotMsg(ctx, state,
+        ctx.t('addmed.invalid_name'),
+        new InlineKeyboard()
+          .text(ctx.t('addmed.btn_from_templates'), `addmed:templates:${state.medkitId}`).row()
+          .text(ctx.t('common.cancel'), 'addmed:cancel')
+      );
+      return true;
+    }
+    state.data.name = sanitizedName;
     // #33 Auto-category detection from name
     const autoCategory = detectCategory(text);
     if (autoCategory) {
@@ -196,7 +209,10 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'dosage_value') {
-    state.data.dosage = `${text} ${state.dosageUnit}`;
+    // #69 Sanitize dosage value
+    const sanitizedDosage = sanitize(text, 100);
+    if (!sanitizedDosage) return true;
+    state.data.dosage = `${sanitizedDosage} ${state.dosageUnit}`;
     // #33 Skip category step if auto-detected
     if (state.autoCategory) {
       state.step = 'tags';
@@ -211,7 +227,10 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'dosage_custom') {
-    state.data.dosage = text;
+    // #69 Sanitize custom dosage
+    const sanitizedCustomDosage = sanitize(text, 100);
+    if (!sanitizedCustomDosage) return true;
+    state.data.dosage = sanitizedCustomDosage;
     // #33 Skip category step if auto-detected
     if (state.autoCategory) {
       state.step = 'tags';
@@ -226,7 +245,10 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'category_custom') {
-    state.data.category = text;
+    // #69 Sanitize custom category
+    const sanitizedCategory = sanitize(text, 100);
+    if (!sanitizedCategory) return true;
+    state.data.category = sanitizedCategory;
     // #15 Remember last category
     await supabase.from('sessions').upsert(
       { key: `lastCategory:${ctx.dbUser.id}`, value: text, updated_at: new Date().toISOString() },
@@ -239,7 +261,8 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'tags') {
-    state.data.tags = text.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    // #69 Sanitize each tag (max 50 per tag)
+    state.data.tags = text.split(',').map(t => sanitize(t, 50)).filter(t => t !== null);
     state.step = 'expiry_year';
     await setState(ctx.dbUser.id, state);
     await sendExpiryYearPicker(ctx, state);
@@ -247,8 +270,9 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'quantity') {
-    const num = parseFloat(text);
-    if (!isNaN(num) && num >= 0) {
+    // #71 Quantity validation: positive, max 99999, comma→dot, max 1 decimal
+    const num = validateQuantity(text);
+    if (num !== null) {
       state.data.quantity = num;
       state.step = 'quantity_unit';
       await setState(ctx.dbUser.id, state);
@@ -256,7 +280,7 @@ export async function handleAddMedicineText(ctx) {
     } else {
       // Show error in the bot message
       await editBotMsg(ctx, state,
-        ctx.t('addmed.step6_invalid'),
+        ctx.t('addmed.quantity_invalid'),
         new InlineKeyboard()
           .text(ctx.t('common.skip'), 'addmed:skip').row()
           .text(ctx.t('common.cancel'), 'addmed:cancel')
@@ -266,7 +290,8 @@ export async function handleAddMedicineText(ctx) {
   }
 
   if (step === 'notes') {
-    state.data.notes = text;
+    // #69 Sanitize notes
+    state.data.notes = sanitize(text, 500);
     state.step = 'confirm';
     await setState(ctx.dbUser.id, state);
     await sendConfirmation(ctx, state);
@@ -689,8 +714,46 @@ export async function handleAddMedicineCallback(ctx, action) {
     const d = String(day).padStart(2, '0');
     state.data.expiryDate = `${y}-${m}-${d}`;
 
-    // #34 Past expiry date warning
+    // #70 Date validation — not >10 years in future
     const parsed = new Date(`${y}-${m}-${d}`);
+    const tenYears = new Date();
+    tenYears.setFullYear(tenYears.getFullYear() + 10);
+    if (parsed > tenYears) {
+      state.data.expiryDate = null;
+      state.step = 'expiry_year';
+      await setState(ctx.dbUser.id, state);
+      await ctx.editMessageText(
+        ctx.t('addmed.date_too_far'),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text(ctx.t('common.back'), 'addmed:expiry_past_reenter')
+            .text(ctx.t('common.cancel'), 'addmed:cancel'),
+        }
+      );
+      return true;
+    }
+
+    // #70 Warn if >5 years in future
+    const fiveYears = new Date();
+    fiveYears.setFullYear(fiveYears.getFullYear() + 5);
+    if (parsed > fiveYears && !state.expiryFarFutureShown) {
+      state.expiryFarFutureShown = true;
+      state.step = 'expiry_far_future_confirm';
+      await setState(ctx.dbUser.id, state);
+      await ctx.editMessageText(
+        ctx.t('medicine.expiry_far_future', { date: formatDate(state.data.expiryDate) }),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text(ctx.t('medicine.btn_continue'), 'addmed:expiry_past_ok')
+            .text(ctx.t('medicine.btn_enter_another'), 'addmed:expiry_past_reenter'),
+        }
+      );
+      return true;
+    }
+
+    // #34 Past expiry date warning
     if (parsed < new Date() && !state.expiryWarningShown) {
       state.step = 'expiry_past_confirm';
       await setState(ctx.dbUser.id, state);
@@ -808,8 +871,13 @@ export async function handleAddMedicineCallback(ctx, action) {
         { onConflict: 'key' }
       );
     }
-    const medicine = await createMedicine(state.data);
+    // #67 Retry for critical medicine creation
+    const medicine = await withRetry(() => createMedicine(state.data));
     await logAction(ctx.dbUser.id, 'create', 'medicine', medicine.id, { name: state.data.name });
+    await checkAchievements(ctx, 'medicine_added');
+    if (state.data.photoFileIds && state.data.photoFileIds.length > 0) {
+      await checkAchievements(ctx, 'photo_added');
+    }
     const fromOnboarding = state.fromOnboarding;
     const medkitId = state.medkitId;
     await clearState(ctx.dbUser.id);

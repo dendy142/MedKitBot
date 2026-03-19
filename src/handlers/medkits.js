@@ -6,6 +6,8 @@ import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil, truncate 
 import { logAction } from '../middleware/logging.js';
 import { startAddMedicine } from './addMedicine.js';
 import { supabase } from '../db/supabase.js';
+import { ensureExists } from '../utils/ensure.js';
+import { checkMedkitRole } from '../middleware/checkRole.js';
 
 /**
  * Show list of user's medkits
@@ -139,6 +141,9 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
   keyboard.text(ctx.t('medkit.btn_sort'), `medkit:${medkitId}:sort`);
   keyboard.text(ctx.t('medkit.btn_filter'), `medkit:${medkitId}:filter`);
   keyboard.row();
+  keyboard.text(ctx.t('sharing.btn_share_list'), `medkit:${medkitId}:share_list`);
+  keyboard.text(ctx.t('sharing.btn_doctor'), `medkit:${medkitId}:doctor`);
+  keyboard.row();
   keyboard.text(ctx.t('medkit.btn_share'), `medkit:${medkitId}:share`);
   keyboard.text(ctx.t('medkit.btn_edit'), `medkit:${medkitId}:rename`);
   keyboard.text(ctx.t('medkit.btn_delete'), `medkit:${medkitId}:delete`);
@@ -233,6 +238,13 @@ export function registerMedkitHandlers(bot) {
 
   // Rename medkit — ask new name
   bot.callbackQuery(/^medkit:([0-9a-f-]+):rename$/, async (ctx) => {
+    const medkit = await getMedkit(ctx.match[1], ctx.dbUser.id);
+    // #65 Stale callback guard
+    if (!await ensureExists(medkit, ctx)) return;
+    // #73 Permission check — need owner role to rename
+    if (!await checkMedkitRole(ctx.match[1], ctx.dbUser.id, 'owner')) {
+      return ctx.answerCallbackQuery({ text: ctx.t('common.insufficient_rights'), show_alert: true });
+    }
     await ctx.answerCallbackQuery();
     await supabase.from('sessions').upsert(
       { key: `state:${ctx.dbUser.id}`, value: { action: 'rename_medkit', medkitId: ctx.match[1], msgId: ctx.callbackQuery.message.message_id }, updated_at: new Date().toISOString() },
@@ -249,9 +261,14 @@ export function registerMedkitHandlers(bot) {
 
   // Delete medkit — confirm
   bot.callbackQuery(/^medkit:([0-9a-f-]+):delete$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
     const medkit = await getMedkit(ctx.match[1], ctx.dbUser.id);
-    if (!medkit) return;
+    // #65 Stale callback guard
+    if (!await ensureExists(medkit, ctx)) return;
+    // #73 Permission check — need owner role to delete
+    if (!await checkMedkitRole(ctx.match[1], ctx.dbUser.id, 'owner')) {
+      return ctx.answerCallbackQuery({ text: ctx.t('common.insufficient_rights'), show_alert: true });
+    }
+    await ctx.answerCallbackQuery();
 
     await ctx.editMessageText(
       ctx.t('medkit.delete_confirm', { name: medkit.name }),
@@ -266,6 +283,10 @@ export function registerMedkitHandlers(bot) {
 
   // Delete medkit — confirmed
   bot.callbackQuery(/^medkit:([0-9a-f-]+):delete:confirm$/, async (ctx) => {
+    // #73 Permission check — need owner role to delete
+    if (!await checkMedkitRole(ctx.match[1], ctx.dbUser.id, 'owner')) {
+      return ctx.answerCallbackQuery({ text: ctx.t('common.insufficient_rights'), show_alert: true });
+    }
     await ctx.answerCallbackQuery(ctx.t('medkit.delete_toast'));
     await deleteMedkit(ctx.match[1]);
     await logAction(ctx.dbUser.id, 'delete', 'medkit', ctx.match[1]);

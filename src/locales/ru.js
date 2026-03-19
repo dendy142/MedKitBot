@@ -57,6 +57,7 @@ export default {
     btn_intake_today: '⏰ Приёмы сегодня',
     btn_add_medicine: '➕ Добавить лекарство',
     btn_achievements: '🏆 Достижения',
+    btn_courses: '📋 Курсы',
     // Empty states
     empty_medkits: 'У вас пока нет аптечек.',
     empty_intakes: 'Нет запланированных приёмов.',
@@ -1154,6 +1155,17 @@ export default {
   // ── Date format (#114) ────────────────────────────────────────
   date_format: {
     label: '📅 Формат дат: {value}',
+  },
+
+  // ── Courses (#104) ──────────────────────────────────────────────
+  course: {
+    btn_create: '➕ Создать курс',
+    title: '📋 *Курс «{name}»*',
+    create_name: '📋 *Создание курса*\n\nВведите название курса:',
+    select_medicines: '💊 Выберите лекарства для курса:',
+    btn_schedules: '📆 Расписания',
+    btn_pause_all: '⏸ Приостановить',
+    btn_complete: '✅ Завершить',
   },
 
   // ── Quick command (#94) ─────────────────────────────────────────

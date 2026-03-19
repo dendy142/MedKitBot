@@ -1,9 +1,10 @@
 import { supabase } from '../../src/db/supabase.js';
 import { Bot } from 'grammy';
-import { BOT_TOKEN, CRON_SECRET } from '../../src/config.js';
+import { BOT_TOKEN, CRON_SECRET, TIPS } from '../../src/config.js';
 import { InlineKeyboard } from 'grammy';
 import { t } from '../../src/locales/index.js';
 import { pluralize } from '../../src/utils/format.js';
+import { log } from '../../src/utils/logger.js';
 
 export default async function handler(req, res) {
   // Verify cron secret
@@ -11,14 +12,18 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  // #79 Cron metrics
+  const startTime = Date.now();
+  let errors = 0;
+
   try {
     const bot = new Bot(BOT_TOKEN);
     const now = new Date();
 
-    // Find users with digest enabled
+    // Find all users with settings
     const { data: users } = await supabase
       .from('users')
-      .select('id, telegram_id, timezone, settings')
+      .select('id, telegram_id, timezone, settings, created_at, last_active_at, last_inactivity_reminder_at')
       .not('settings', 'is', null);
 
     if (!users || users.length === 0) {
@@ -26,20 +31,42 @@ export default async function handler(req, res) {
     }
 
     let sent = 0;
+    let tipsSent = 0;
+    let inactiveReminders = 0;
 
     for (const user of users) {
       try {
         const settings = user.settings;
+        const lang = settings?.language || 'ru';
+        const timezone = user.timezone || 'Etc/GMT-3';
+
+        // ─── Feature tips (#83) ───────────────────────────────
+        if (settings?.showTips !== false) {
+          try {
+            await sendTipIfNeeded(bot, user, lang, now);
+            tipsSent++;
+          } catch (e) {
+            log('error', { cron: 'digest', action: 'send_tip', userId: user.id, error: e.message });
+          }
+        }
+
+        // ─── Inactive user reminder (#89) ─────────────────────
+        if (settings?.inactivityReminder !== false) {
+          try {
+            await sendInactiveReminderIfNeeded(bot, user, lang, now);
+            inactiveReminders++;
+          } catch (e) {
+            log('error', { cron: 'digest', action: 'inactive_reminder', userId: user.id, error: e.message });
+          }
+        }
+
+        // ─── Digest ───────────────────────────────────────────
         if (!settings?.digest?.enabled) continue;
 
-        const lang = settings.language || 'ru';
-        const timezone = user.timezone || 'Etc/GMT-3';
         const digestTime = settings.digest.time || '08:00';
 
         // Check if current hour matches digest time in user's timezone
         const userNow = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
-        const currentHour = String(userNow.getHours()).padStart(2, '0');
-        const currentMinute = String(userNow.getMinutes()).padStart(2, '0');
 
         // Allow 30-minute window for cron execution
         const [digestH, digestM] = digestTime.split(':').map(Number);
@@ -84,7 +111,6 @@ export default async function handler(req, res) {
         if (include.includes('expiry')) {
           const thresholdDate = new Date(now.getTime() + thresholds.expiry_days * 86400000);
 
-          // Get user's medkits
           const { data: memberships } = await supabase
             .from('medkit_members')
             .select('medkit_id')
@@ -167,17 +193,115 @@ export default async function handler(req, res) {
 
         sent++;
       } catch (e) {
-        console.error(`Failed to send digest to user ${user.id}:`, e.message);
+        errors++;
+        log('error', { cron: 'digest', action: 'send_digest', userId: user.id, error: e.message });
       }
     }
 
-    return res.json({ ok: true, sent });
+    // #79 Cron metrics
+    const duration = Date.now() - startTime;
+    log('info', { cron: 'digest', duration_ms: duration, sent, tipsSent, inactiveReminders, users: users.length, errors });
+
+    return res.json({ ok: true, sent, tipsSent, inactiveReminders, duration_ms: duration });
   } catch (error) {
-    console.error('Digest cron error:', error);
+    const duration = Date.now() - startTime;
+    log('error', { cron: 'digest', duration_ms: duration, error: error.message });
     return res.status(500).json({ error: error.message });
   }
 }
 
 function fmtDate(d) {
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
+/**
+ * #83 Feature tips — send one tip per day for first 7 days
+ */
+async function sendTipIfNeeded(bot, user, lang, now) {
+  const createdAt = new Date(user.created_at);
+  const daysSinceCreation = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+
+  // Only first 7 days
+  if (daysSinceCreation < 0 || daysSinceCreation >= 7) return;
+
+  const tipKey = TIPS[daysSinceCreation]; // tip_1 through tip_7
+  if (!tipKey) return;
+
+  // Check if already sent
+  const { count: alreadySent } = await supabase
+    .from('action_logs')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('action', 'tip_sent')
+    .eq('entity_id', tipKey);
+
+  if (alreadySent > 0) return;
+
+  const tipText = t(`onboarding.${tipKey}`, lang);
+  if (tipText === `onboarding.${tipKey}`) return; // Key not found
+
+  try {
+    await bot.api.sendMessage(user.telegram_id, tipText);
+
+    await supabase.from('action_logs').insert({
+      user_id: user.id,
+      action: 'tip_sent',
+      entity_type: 'tip',
+      entity_id: tipKey,
+    });
+  } catch { /* user may have blocked the bot */ }
+}
+
+/**
+ * #89 Inactive user reminder — if last_active_at > 14 days ago
+ * and user has active schedules, send one reminder max every 30 days
+ */
+async function sendInactiveReminderIfNeeded(bot, user, lang, now) {
+  if (!user.last_active_at) return;
+
+  const lastActive = new Date(user.last_active_at);
+  const daysSinceActive = Math.floor((now - lastActive) / (1000 * 60 * 60 * 24));
+
+  // Only if inactive for > 14 days
+  if (daysSinceActive <= 14) return;
+
+  // Check last reminder sent (max 1 per 30 days)
+  if (user.last_inactivity_reminder_at) {
+    const lastReminder = new Date(user.last_inactivity_reminder_at);
+    const daysSinceReminder = Math.floor((now - lastReminder) / (1000 * 60 * 60 * 24));
+    if (daysSinceReminder < 30) return;
+  }
+
+  // Check if user has active schedules
+  const { count: activeScheds } = await supabase
+    .from('schedules')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('status', 'active');
+
+  if (!activeScheds || activeScheds === 0) return;
+
+  // Count pending intakes
+  const todayStr = now.toISOString().split('T')[0];
+  const { count: pendingCount } = await supabase
+    .from('intake_logs')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('status', 'pending')
+    .gte('planned_at', `${todayStr}T00:00:00`);
+
+  const count = pendingCount || activeScheds;
+
+  try {
+    await bot.api.sendMessage(
+      user.telegram_id,
+      t('cron.inactive_reminder', lang, { count })
+    );
+
+    // Update last_inactivity_reminder_at
+    await supabase
+      .from('users')
+      .update({ last_inactivity_reminder_at: now.toISOString() })
+      .eq('id', user.id);
+  } catch { /* user may have blocked the bot */ }
 }

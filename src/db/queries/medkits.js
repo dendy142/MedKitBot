@@ -86,14 +86,48 @@ export async function renameMedkit(medkitId, newName) {
 }
 
 /**
- * Delete a medkit and all its data
+ * #74 Delete a medkit and all its data with proper cascade order.
+ * #75 Sequential operations with error handling (no real transactions in Supabase JS).
+ *
+ * Order: intake_logs → schedules → shopping_list → medicine_notes → medicines
+ *        → medkit_members → invitations → medkits
  */
 export async function deleteMedkit(medkitId) {
-  // Delete members, medicines, etc. (cascade should handle this via FK)
-  await supabase.from('medkit_members').delete().eq('medkit_id', medkitId);
-  await supabase.from('medicines').delete().eq('medkit_id', medkitId);
-  const { error } = await supabase.from('medkits').delete().eq('id', medkitId);
-  if (error) throw error;
+  // Get all medicine IDs in this medkit (needed for child-table deletes)
+  const { data: meds } = await supabase
+    .from('medicines')
+    .select('id')
+    .eq('medkit_id', medkitId);
+  const medIds = (meds || []).map(m => m.id);
+
+  try {
+    if (medIds.length > 0) {
+      // 1. intake_logs (via schedules → medicine_id)
+      await supabase.from('intake_logs').delete().in('medicine_id', medIds);
+      // 2. schedules
+      await supabase.from('schedules').delete().in('medicine_id', medIds);
+      // 3. shopping_list (by medicine_id)
+      await supabase.from('shopping_list').delete().in('medicine_id', medIds);
+      // 4. medicine_history (medicine_notes equivalent)
+      await supabase.from('medicine_history').delete().in('medicine_id', medIds);
+    }
+    // 5. medicines
+    await supabase.from('medicines').delete().eq('medkit_id', medkitId);
+    // 6. medkit_members
+    await supabase.from('medkit_members').delete().eq('medkit_id', medkitId);
+    // 7. invitations
+    await supabase.from('invitations').delete().eq('medkit_id', medkitId);
+    // 8. medkits
+    const { error } = await supabase.from('medkits').delete().eq('id', medkitId);
+    if (error) throw error;
+  } catch (err) {
+    // Log but still try to clean up the medkit itself
+    console.error('Error during cascade delete of medkit:', medkitId, err?.message);
+    // Attempt final cleanup
+    await supabase.from('medkit_members').delete().eq('medkit_id', medkitId);
+    await supabase.from('medkits').delete().eq('id', medkitId);
+    throw err;
+  }
 }
 
 /**

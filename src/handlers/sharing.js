@@ -1,7 +1,10 @@
 import { InlineKeyboard } from 'grammy';
 import { supabase } from '../db/supabase.js';
 import { getMedkit } from '../db/queries/medkits.js';
+import { getMedkitMedicines } from '../db/queries/medicines.js';
 import { createInvitation, getInvitationByCode, acceptInvitation, getMedkitInvitations } from '../db/queries/invitations.js';
+import { formatQuantity, formatExpiry } from '../utils/format.js';
+import { checkAchievements } from './achievements.js';
 
 function getRoleLabels(ctx) {
   return {
@@ -117,15 +120,22 @@ async function generateShareLink(ctx, medkitId, role) {
   const invitation = await createInvitation(medkitId, role);
   const link = `https://t.me/my_med_kit_bot?start=invite_${invitation.invite_code}`;
 
+  // Count medicines for pretty invite card (#85)
+  const medicines = await getMedkitMedicines(medkitId);
+  const medCount = medicines.length;
+
   const keyboard = new InlineKeyboard()
     .text(ctx.t('sharing.btn_new_link'), `medkit:${medkitId}:share:link`)
     .row()
     .text(ctx.t('common.back'), `medkit:${medkitId}:share`);
 
-  await ctx.editMessageText(
-    ctx.t('sharing.link_result', { role: ROLE_LABELS[role], name: medkit.name, link }),
-    { parse_mode: 'Markdown', reply_markup: keyboard }
-  );
+  // Pretty invite card (#85)
+  const cardText = ctx.t('sharing.invite_card', { name: medkit.name, medCount, link });
+
+  await ctx.editMessageText(cardText, { parse_mode: 'Markdown', reply_markup: keyboard });
+
+  // Award achievement (#90)
+  try { await checkAchievements(ctx, 'medkit_shared'); } catch { /* ignore */ }
 }
 
 // ─── Share by username — role selection ──────────────────────
@@ -866,5 +876,93 @@ export function registerSharingHandlers(bot) {
   bot.callbackQuery(/^medkit:([0-9a-f-]+):transfer:([0-9a-f-]+):confirm$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await transferOwnership(ctx, ctx.match[1], ctx.match[2]);
+  });
+
+  // Share medicine list (#86)
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):share_list$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    const medkit = await getMedkit(medkitId, ctx.dbUser.id);
+    if (!medkit) return;
+
+    const medicines = await getMedkitMedicines(medkitId);
+    if (medicines.length === 0) {
+      return;
+    }
+
+    let text = ctx.t('sharing.share_list_title', { name: medkit.name });
+    medicines.forEach((med, i) => {
+      const qty = formatQuantity(med.quantity, med.quantity_unit);
+      const expiry = med.expiry_date ? formatExpiry(med.expiry_date) : '—';
+      text += ctx.t('sharing.share_list_item', { n: i + 1, med: `${med.name}${med.dosage ? ' ' + med.dosage : ''}`, qty, expiry });
+    });
+    text += ctx.t('sharing.share_list_footer');
+
+    // Send as new message (can be forwarded)
+    await ctx.reply(text);
+  });
+
+  // Export for doctor (#88)
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):doctor$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    const medkit = await getMedkit(medkitId, ctx.dbUser.id);
+    if (!medkit) return;
+
+    const medicines = await getMedkitMedicines(medkitId);
+    if (medicines.length === 0) {
+      await ctx.reply(ctx.t('sharing.export_doctor_empty'));
+      return;
+    }
+
+    let text = ctx.t('sharing.export_doctor_title');
+
+    // Patient info (try profiles)
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('user_id', ctx.dbUser.id)
+      .limit(1);
+    if (profiles && profiles.length > 0) {
+      const p = profiles[0];
+      text += ctx.t('sharing.export_doctor_patient', { name: `${p.icon || ''} ${p.name}`.trim() });
+      if (p.birth_year) {
+        const age = new Date().getFullYear() - p.birth_year;
+        text += ctx.t('sharing.export_doctor_age', { age });
+      }
+    } else if (ctx.dbUser.first_name) {
+      text += ctx.t('sharing.export_doctor_patient', { name: ctx.dbUser.first_name });
+    }
+
+    text += ctx.t('sharing.export_doctor_meds');
+
+    for (let i = 0; i < medicines.length; i++) {
+      const med = medicines[i];
+      const dosage = med.dosage ? ` ${med.dosage}` : '';
+
+      // Get schedules for this medicine
+      const { data: scheds } = await supabase
+        .from('schedules')
+        .select('*')
+        .eq('medicine_id', med.id)
+        .eq('status', 'active');
+
+      let schedule = '';
+      if (scheds && scheds.length > 0) {
+        const times = scheds.map(s => s.time_value).join(', ');
+        schedule = ` — ${scheds[0].dose_per_intake} ${med.quantity_unit || 'шт'} x ${scheds.length} раз/день (${times})`;
+      }
+
+      text += ctx.t('sharing.export_doctor_med_item', { n: i + 1, name: med.name, dosage, schedule });
+    }
+
+    // Tags
+    const allTags = new Set();
+    medicines.forEach(m => (m.tags || []).forEach(t => allTags.add(t)));
+    if (allTags.size > 0) {
+      text += ctx.t('sharing.export_doctor_tags', { tags: [...allTags].join(', ') });
+    }
+
+    await ctx.reply(text, { parse_mode: 'Markdown' });
   });
 }

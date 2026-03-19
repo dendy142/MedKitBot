@@ -5,9 +5,88 @@ import { getTodayIntakeLogs } from '../db/queries/intakeLogs.js';
 import { supabase } from '../db/supabase.js';
 
 /**
+ * Build profile completion data (#84)
+ */
+async function getProfileCompletion(userId, settings) {
+  const criteria = [];
+  let done = 0;
+  const total = 6;
+
+  // 1. Has medkit
+  const { count: medkitCount } = await supabase
+    .from('medkit_members')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+  const hasMedkit = medkitCount > 0;
+  criteria.push({ key: hasMedkit ? 'progress_medkit' : 'progress_no_medkit', done: hasMedkit });
+  if (hasMedkit) done++;
+
+  // 2. Has medicine
+  if (hasMedkit) {
+    const { data: memberships } = await supabase
+      .from('medkit_members')
+      .select('medkit_id')
+      .eq('user_id', userId);
+    const medkitIds = (memberships || []).map(m => m.medkit_id);
+    const { count: medCount } = await supabase
+      .from('medicines')
+      .select('*', { count: 'exact', head: true })
+      .in('medkit_id', medkitIds)
+      .eq('is_archived', false);
+    const hasMed = medCount > 0;
+    criteria.push({ key: hasMed ? 'progress_medicine' : 'progress_no_medicine', done: hasMed });
+    if (hasMed) done++;
+
+    // 3. Has schedule
+    const { count: schedCount } = await supabase
+      .from('schedules')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('status', 'active');
+    const hasSched = schedCount > 0;
+    criteria.push({ key: hasSched ? 'progress_schedule' : 'progress_no_schedule', done: hasSched });
+    if (hasSched) done++;
+
+    // 4. Has photo
+    const { data: medsWithPhotos } = await supabase
+      .from('medicines')
+      .select('photo_file_ids')
+      .in('medkit_id', medkitIds)
+      .eq('is_archived', false)
+      .not('photo_file_ids', 'eq', '{}')
+      .limit(1);
+    const hasPhoto = medsWithPhotos && medsWithPhotos.length > 0;
+    criteria.push({ key: hasPhoto ? 'progress_photo' : 'progress_no_photo', done: hasPhoto });
+    if (hasPhoto) done++;
+  } else {
+    criteria.push({ key: 'progress_no_medicine', done: false });
+    criteria.push({ key: 'progress_no_schedule', done: false });
+    criteria.push({ key: 'progress_no_photo', done: false });
+  }
+
+  // 5. Timezone set (not default Moscow)
+  const hasTz = settings?.timezone && settings.timezone !== 'Europe/Moscow';
+  // Actually check from user row
+  criteria.push({ key: hasTz ? 'progress_timezone' : 'progress_no_timezone', done: hasTz });
+  if (hasTz) done++;
+
+  // 6. Has profile
+  const { count: profileCount } = await supabase
+    .from('profiles')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+  const hasProfile = profileCount > 0;
+  criteria.push({ key: hasProfile ? 'progress_profile' : 'progress_no_profile', done: hasProfile });
+  if (hasProfile) done++;
+
+  const pct = Math.round((done / total) * 100);
+  return { pct, criteria, done, total };
+}
+
+/**
  * Build dashboard text for main menu
  */
-async function buildDashboard(userId, settings, t) {
+async function buildDashboard(userId, settings, t, dbUser) {
   const medkits = await getUserMedkits(userId);
   const medkitCount = medkits.length;
   const shopCount = await countShoppingItems(userId);
@@ -18,6 +97,7 @@ async function buildDashboard(userId, settings, t) {
   let lowStockCount = 0;
   let expiredCount = 0;
   let expiringSoonCount = 0;
+  let hasAttention = false;
 
   if (medkitCount > 0) {
     const medkitIds = medkits.map(m => m.id);
@@ -64,6 +144,8 @@ async function buildDashboard(userId, settings, t) {
       .lte('quantity', thresholds.low_stock_count)
       .gt('quantity', 0);
     lowStockCount = lowCount || 0;
+
+    hasAttention = expiredCount > 0 || expiringSoonCount > 0;
   }
 
   // Intake stats for today
@@ -85,25 +167,36 @@ async function buildDashboard(userId, settings, t) {
     if (lowStockCount > 0) text += t('menu.low_stock', { count: lowStockCount }) + '\n';
     if (shopCount > 0) text += t('menu.shopping_count', { count: shopCount }) + '\n';
 
-    // Attention banner for expired / expiring-soon medicines
-    if (expiredCount > 0 || expiringSoonCount > 0) {
+    // Attention banner for expired / expiring-soon medicines (#92)
+    if (hasAttention) {
       text += '\n' + t('menu.attention') + '\n';
       if (expiredCount > 0) text += t('menu.attention_expired', { count: expiredCount }) + '\n';
       if (expiringSoonCount > 0) text += t('menu.attention_expiring', { count: expiringSoonCount }) + '\n';
     }
   }
 
-  return text;
+  // Profile completion progress (#84)
+  try {
+    const { pct, criteria } = await getProfileCompletion(userId, dbUser);
+    if (pct < 100) {
+      text += '\n' + t('onboarding.progress_title', { pct }) + '\n';
+      for (const c of criteria) {
+        text += t(`onboarding.${c.key}`) + '\n';
+      }
+    }
+  } catch { /* ignore profile completion errors */ }
+
+  return { text, hasAttention };
 }
 
 /**
  * Send main menu (new message)
  */
 export async function handleMainMenu(ctx) {
-  const text = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings, ctx.t);
+  const { text, hasAttention } = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings, ctx.t, ctx.dbUser);
   await ctx.reply(text, {
     parse_mode: 'Markdown',
-    reply_markup: mainMenuKeyboard(ctx.t),
+    reply_markup: mainMenuKeyboard(ctx.t, hasAttention),
   });
 }
 
@@ -112,9 +205,9 @@ export async function handleMainMenu(ctx) {
  */
 export async function handleMainMenuCallback(ctx) {
   await ctx.answerCallbackQuery();
-  const text = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings, ctx.t);
+  const { text, hasAttention } = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings, ctx.t, ctx.dbUser);
   await ctx.editMessageText(text, {
     parse_mode: 'Markdown',
-    reply_markup: mainMenuKeyboard(ctx.t),
+    reply_markup: mainMenuKeyboard(ctx.t, hasAttention),
   });
 }

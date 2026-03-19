@@ -141,19 +141,19 @@ async function showMedicineCard(ctx, medicineId) {
 
   text += `\n${med.is_favorite ? ctx.t('medicine.label_favorite') : ''}`;
 
-  // Keyboard
+  // Keyboard — max 3 short buttons per row
   const keyboard = new InlineKeyboard();
   keyboard.text(ctx.t('medicine.btn_edit'), `med:${med.id}:edit`);
+  keyboard.text(med.is_favorite ? '⭐' : '☆', `med:${med.id}:fav`);
+  keyboard.row();
   // #18 Quick restock buttons
   keyboard.text('+1', `med:${med.id}:restock:1`);
   keyboard.text('+5', `med:${med.id}:restock:5`);
   keyboard.text('+10', `med:${med.id}:restock:10`);
-  keyboard.row();
   keyboard.text(ctx.t('medicine.btn_restock_custom'), `med:${med.id}:restock`);
   keyboard.row();
   keyboard.text(ctx.t('medicine.btn_schedule'), `med:${med.id}:schedule`);
   keyboard.text(ctx.t('medicine.btn_copy'), `med:${med.id}:copymove`);
-  keyboard.text(med.is_favorite ? '⭐' : '☆', `med:${med.id}:fav`);
   keyboard.row();
   if (med.photo_file_ids && med.photo_file_ids.length > 0) {
     keyboard.text(ctx.t('medicine.btn_photos', { count: med.photo_file_ids.length }), `med:${med.id}:photos`);

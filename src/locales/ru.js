@@ -509,6 +509,13 @@ export default {
     tz_label: '🕐 Часовой пояс: {value}',
     notif_reminders: '🔔 Напоминания: {value}',
     notif_expiry: '📅 Сроки годности: {value}',
+    // Settings groups
+    btn_group_notifications: '🔔 Уведомления и расписание',
+    btn_group_display: '📋 Отображение и меню',
+    btn_group_data: '📦 Данные и профили',
+    // Group titles
+    group_notifications_title: '🔔 *Уведомления и расписание*\n\n',
+    group_display_title: '📋 *Отображение и меню*\n\n',
     notif_stock: '📉 Остатки: {value}',
     digest_label: '📊 Дайджест: {value}',
     on: 'вкл',

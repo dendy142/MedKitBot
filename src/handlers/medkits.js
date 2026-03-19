@@ -142,35 +142,34 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
 
   const keyboard = new InlineKeyboard();
 
-  // Medicine buttons (2 per row)
-  for (let i = 0; i < pageItems.length; i += 2) {
-    keyboard.text(pageItems[i].name, `med:${pageItems[i].id}`);
-    if (pageItems[i + 1]) {
-      keyboard.text(pageItems[i + 1].name, `med:${pageItems[i + 1].id}`);
-    }
-    keyboard.row();
+  // Medicine buttons (1 per row — names can be long)
+  for (const item of pageItems) {
+    keyboard.text(item.name, `med:${item.id}`).row();
   }
 
   addPagination(keyboard, page, medicines.length, `mk:${medkitId}`);
 
+  // Action rows — max 2 buttons per row to avoid overflow
   keyboard.row();
   keyboard.text(ctx.t('medkit.btn_add'), `medkit:${medkitId}:add`);
   keyboard.text(ctx.t('medkit.btn_sort'), `medkit:${medkitId}:sort`);
-  keyboard.text(ctx.t('medkit.btn_filter'), `medkit:${medkitId}:filter`);
   keyboard.row();
+  keyboard.text(ctx.t('medkit.btn_filter'), `medkit:${medkitId}:filter`);
   keyboard.text(ctx.t('profile.btn_filter_profile'), `medkit:${medkitId}:filter:profile`);
+  keyboard.row();
   keyboard.text(ctx.t('sharing.btn_share_list'), `medkit:${medkitId}:share_list`);
   keyboard.text(ctx.t('sharing.btn_doctor'), `medkit:${medkitId}:doctor`);
   keyboard.row();
-  keyboard.text(ctx.t('medkit.btn_share'), `medkit:${medkitId}:share`);
   keyboard.text(ctx.t('medkit.btn_edit'), `medkit:${medkitId}:rename`);
-  keyboard.text(ctx.t('medkit.btn_delete'), `medkit:${medkitId}:delete`);
+  keyboard.text(ctx.t('medkit.btn_share'), `medkit:${medkitId}:share`);
   keyboard.row();
   // #22 Multiselect
   if (medicines.length > 0) {
     keyboard.text(ctx.t('medkit.btn_multiselect'), `multiselect:${medkitId}:start`);
   }
   keyboard.text(ctx.t('medkit.btn_archive'), `medkit:${medkitId}:archive`);
+  keyboard.row();
+  keyboard.text(ctx.t('medkit.btn_delete'), `medkit:${medkitId}:delete`);
   keyboard.text(ctx.t('common.back'), 'medkits');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -377,17 +376,15 @@ export function registerMedkitHandlers(bot) {
     }
 
     const keyboard = new InlineKeyboard();
-    for (let i = 0; i < pageItems.length; i += 2) {
-      keyboard.text(pageItems[i].name, `med:${pageItems[i].id}`);
-      if (pageItems[i + 1]) keyboard.text(pageItems[i + 1].name, `med:${pageItems[i + 1].id}`);
-      keyboard.row();
+    for (const item of pageItems) {
+      keyboard.text(item.name, `med:${item.id}`).row();
     }
     addPagination(keyboard, 0, medicines.length, `mk:${medkitId}`);
     keyboard.row();
     keyboard.text(ctx.t('medkit.btn_add'), `medkit:${medkitId}:add`);
     keyboard.text(ctx.t('medkit.btn_sort'), `medkit:${medkitId}:sort`);
-    keyboard.text(ctx.t('medkit.btn_filter'), `medkit:${medkitId}:filter`);
     keyboard.row();
+    keyboard.text(ctx.t('medkit.btn_filter'), `medkit:${medkitId}:filter`);
     keyboard.text(ctx.t('common.back'), 'medkits');
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });

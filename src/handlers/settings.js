@@ -23,40 +23,15 @@ async function showSettings(ctx) {
   text += ctx.t('settings.quiet_label', { value: s.quiet_hours?.enabled ? '✅' : '❌' }) + '\n';
   text += ctx.t('settings.weekly_label', { value: s.weeklyReport ? '✅' : '❌' }) + '\n';
   text += ctx.t('settings.auto_shop_label', { value: s.autoShoppingList ? '✅' : '❌' }) + '\n';
-  // #113 Notification style
-  const notifStyle = s.notifications?.notification_style || 'brief';
-  text += ctx.t('notif_style.title', { current: notifStyle === 'brief' ? ctx.t('notif_style.brief') : ctx.t('notif_style.detailed') }) + '\n';
-  // #114 Menu layout
-  const menuLayout = s.menuLayout || 'default';
-  text += ctx.t('menu_layout.label', { value: menuLayout === 'compact' ? ctx.t('menu_layout.compact') : ctx.t('menu_layout.default') }) + '\n';
 
   const keyboard = new InlineKeyboard()
     .text(ctx.t('settings.btn_timezone'), 'set:tz')
     .row()
-    .text(ctx.t('settings.btn_notifications'), 'set:notif')
+    .text(ctx.t('settings.btn_group_notifications'), 'set:group:notif')
     .row()
-    .text(ctx.t('settings.btn_thresholds'), 'set:thresh')
+    .text(ctx.t('settings.btn_group_display'), 'set:group:display')
     .row()
-    .text(ctx.t('settings.btn_periods'), 'set:periods')
-    .row()
-    .text(ctx.t('settings.btn_digest'), 'set:digest')
-    .row()
-    .text(ctx.t('settings.btn_quiet_hours'), 'settings:quiet_hours')
-    .row()
-    .text(ctx.t('settings.btn_weekly_report'), 'set:weekly_report')
-    .row()
-    .text(ctx.t('settings.btn_auto_shop'), 'set:auto_shop')
-    .row()
-    .text(`🔔 ${ctx.t('settings.notif_style_title')} ${notifStyle === 'brief' ? ctx.t('notif_style.brief') : ctx.t('notif_style.detailed')}`, 'set:notif_style')
-    .row()
-    .text(ctx.t('settings.btn_display'), 'set:display')
-    .row()
-    .text(ctx.t('menu_layout.btn_toggle', { current: menuLayout === 'compact' ? ctx.t('menu_layout.compact') : ctx.t('menu_layout.default') }), 'set:menu_layout')
-    .row()
-    .text(ctx.t('settings.btn_profiles'), 'profiles')
-    .row()
-    .text(ctx.t('settings.btn_export'), 'export')
-    .text(ctx.t('settings.btn_import'), 'import')
+    .text(ctx.t('settings.btn_group_data'), 'set:group:data')
     .row()
     .text(ctx.t('common.back'), 'main_menu');
 
@@ -68,12 +43,105 @@ async function showSettings(ctx) {
 }
 
 /**
+ * Show notifications & schedule group
+ */
+async function showNotificationsGroup(ctx) {
+  const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+  const notifStyle = s.notifications?.notification_style || 'brief';
+
+  const crumb = breadcrumb(ctx.t('common.breadcrumb_home'), '⚙️', '🔔');
+  let text = `${crumb}\n\n` + ctx.t('settings.group_notifications_title');
+  text += ctx.t('settings.notif_reminders', { value: s.notifications?.intake_reminders ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.notif_expiry', { value: s.notifications?.expiry_alerts ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.notif_stock', { value: s.notifications?.low_stock_alerts ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.digest_label', { value: s.digest?.enabled ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.quiet_label', { value: s.quiet_hours?.enabled ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.weekly_label', { value: s.weeklyReport ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.auto_shop_label', { value: s.autoShoppingList ? '✅' : '❌' }) + '\n';
+
+  const keyboard = new InlineKeyboard()
+    .text(ctx.t('settings.btn_notifications'), 'set:notif')
+    .text(ctx.t('settings.btn_thresholds'), 'set:thresh')
+    .row()
+    .text(ctx.t('settings.btn_periods'), 'set:periods')
+    .text(ctx.t('settings.btn_digest'), 'set:digest')
+    .row()
+    .text(ctx.t('settings.btn_quiet_hours'), 'settings:quiet_hours')
+    .text(ctx.t('settings.btn_weekly_report'), 'set:weekly_report')
+    .row()
+    .text(ctx.t('settings.btn_auto_shop'), 'set:auto_shop')
+    .text(`🔔 ${notifStyle === 'brief' ? ctx.t('notif_style.brief') : ctx.t('notif_style.detailed')}`, 'set:notif_style')
+    .row()
+    .text(ctx.t('common.back'), 'settings');
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+/**
+ * Show display & menu group
+ */
+async function showDisplayGroup(ctx) {
+  const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+  const d = s.display || DEFAULT_SETTINGS.display;
+  const menuLayout = s.menuLayout || 'default';
+
+  const crumb = breadcrumb(ctx.t('common.breadcrumb_home'), '⚙️', '📋');
+  let text = `${crumb}\n\n` + ctx.t('settings.group_display_title');
+  text += ctx.t('settings.display_sort', { value: d.default_sort }) + '\n';
+  text += ctx.t('settings.display_date', { value: d.date_format }) + '\n';
+  text += ctx.t('menu_layout.label', { value: menuLayout === 'compact' ? ctx.t('menu_layout.compact') : ctx.t('menu_layout.default') }) + '\n';
+
+  const keyboard = new InlineKeyboard()
+    .text(ctx.t('settings.btn_display'), 'set:display')
+    .row()
+    .text(ctx.t('menu_layout.btn_toggle', { current: menuLayout === 'compact' ? ctx.t('menu_layout.compact') : ctx.t('menu_layout.default') }), 'set:menu_layout')
+    .row()
+    .text(ctx.t('common.back'), 'settings');
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+/**
+ * Show data & profiles group
+ */
+async function showDataGroup(ctx) {
+  const crumb = breadcrumb(ctx.t('common.breadcrumb_home'), '⚙️', '📦');
+  const text = `${crumb}\n\n📦 *Данные и профили*`;
+
+  const keyboard = new InlineKeyboard()
+    .text(ctx.t('settings.btn_profiles'), 'profiles')
+    .row()
+    .text(ctx.t('settings.btn_export'), 'export')
+    .text(ctx.t('settings.btn_import'), 'import')
+    .row()
+    .text(ctx.t('common.back'), 'settings');
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+/**
  * Register settings handlers
  */
 export function registerSettingsHandlers(bot) {
   bot.callbackQuery('settings', async (ctx) => {
     await ctx.answerCallbackQuery();
     await showSettings(ctx);
+  });
+
+  // --- Settings groups ---
+  bot.callbackQuery('set:group:notif', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showNotificationsGroup(ctx);
+  });
+
+  bot.callbackQuery('set:group:display', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showDisplayGroup(ctx);
+  });
+
+  bot.callbackQuery('set:group:data', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showDataGroup(ctx);
   });
 
   // --- Timezone ---
@@ -114,7 +182,7 @@ export function registerSettingsHandlers(bot) {
       .row()
       .text(`${n.shared_medkit_changes ? '✅' : '❌'} ${ctx.t('settings.notif_shared')}`, 'set:notif:shared_medkit_changes')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:notif');
 
     await ctx.editMessageText(ctx.t('settings.notif_title'), {
       parse_mode: 'Markdown',
@@ -142,7 +210,7 @@ export function registerSettingsHandlers(bot) {
       .row()
       .text(`${n.shared_medkit_changes ? '✅' : '❌'} ${ctx.t('settings.notif_shared')}`, 'set:notif:shared_medkit_changes')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:notif');
 
     await ctx.editMessageText(ctx.t('settings.notif_title'), {
       parse_mode: 'Markdown',
@@ -169,7 +237,7 @@ export function registerSettingsHandlers(bot) {
       .text(ctx.t('settings.btn_thresh_stock_5'), 'set:thresh:stock:5')
       .text(ctx.t('settings.btn_thresh_stock_10'), 'set:thresh:stock:10')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:notif');
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
@@ -196,7 +264,7 @@ export function registerSettingsHandlers(bot) {
       .text(ctx.t('settings.btn_thresh_stock_5'), 'set:thresh:stock:5')
       .text(ctx.t('settings.btn_thresh_stock_10'), 'set:thresh:stock:10')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:notif');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -221,7 +289,7 @@ export function registerSettingsHandlers(bot) {
       .text(ctx.t('settings.btn_thresh_stock_5'), 'set:thresh:stock:5')
       .text(ctx.t('settings.btn_thresh_stock_10'), 'set:thresh:stock:10')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:notif');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -322,7 +390,7 @@ export function registerSettingsHandlers(bot) {
       .text(ctx.t('settings.btn_date_ddmmyyyy'), 'set:disp:date:DD.MM.YYYY')
       .text(ctx.t('settings.btn_date_yyyymmdd'), 'set:disp:date:YYYY-MM-DD')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:display');
 
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
@@ -349,7 +417,7 @@ export function registerSettingsHandlers(bot) {
       .text(ctx.t('settings.btn_date_ddmmyyyy'), 'set:disp:date:DD.MM.YYYY')
       .text(ctx.t('settings.btn_date_yyyymmdd'), 'set:disp:date:YYYY-MM-DD')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:display');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -375,7 +443,7 @@ export function registerSettingsHandlers(bot) {
       .text(ctx.t('settings.btn_date_ddmmyyyy'), 'set:disp:date:DD.MM.YYYY')
       .text(ctx.t('settings.btn_date_yyyymmdd'), 'set:disp:date:YYYY-MM-DD')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:display');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
 
@@ -464,7 +532,7 @@ export function registerSettingsHandlers(bot) {
     await updateUserSettings(ctx.dbUser.id, s);
     ctx.dbUser.settings = s;
     await ctx.answerCallbackQuery(ctx.t('notif_style.toast', { style: newStyle === 'brief' ? ctx.t('notif_style.brief') : ctx.t('notif_style.detailed') }));
-    await showSettings(ctx);
+    await showNotificationsGroup(ctx);
   });
 
   // --- Menu Layout (#114) ---
@@ -477,7 +545,7 @@ export function registerSettingsHandlers(bot) {
     ctx.dbUser.settings = s;
     const label = newLayout === 'compact' ? ctx.t('menu_layout.compact') : ctx.t('menu_layout.default');
     await ctx.answerCallbackQuery(ctx.t('menu_layout.toast', { value: label }));
-    await showSettings(ctx);
+    await showDisplayGroup(ctx);
   });
 
   // --- Weekly Report (#45) ---
@@ -514,7 +582,7 @@ async function showPeriodsMenu(ctx) {
     .text(ctx.t('settings.btn_period_evening'), 'set:period:evening')
     .text(ctx.t('settings.btn_period_night'), 'set:period:night')
     .row()
-    .text(ctx.t('common.back'), 'settings');
+    .text(ctx.t('common.back'), 'set:group:notif');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -534,7 +602,7 @@ async function showDigestMenu(ctx) {
     .row()
     .text(ctx.t('settings.btn_digest_time', { time: digestTime }), 'set:digest:time')
     .row()
-    .text(ctx.t('common.back'), 'settings');
+    .text(ctx.t('common.back'), 'set:group:notif');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -556,7 +624,7 @@ async function showQuietHoursMenu(ctx) {
     .row()
     .text(ctx.t('settings.btn_quiet_to', { time: qh.to }), 'set:quiet:to')
     .row()
-    .text(ctx.t('common.back'), 'settings');
+    .text(ctx.t('common.back'), 'set:group:notif');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -572,7 +640,7 @@ async function showAutoShopMenu(ctx) {
   const keyboard = new InlineKeyboard()
     .text(enabled ? ctx.t('settings.btn_auto_shop_off') : ctx.t('settings.btn_auto_shop_on'), 'set:auto_shop:toggle')
     .row()
-    .text(ctx.t('common.back'), 'settings');
+    .text(ctx.t('common.back'), 'set:group:notif');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -588,7 +656,7 @@ async function showWeeklyReportMenu(ctx) {
   const keyboard = new InlineKeyboard()
     .text(enabled ? ctx.t('settings.btn_weekly_off') : ctx.t('settings.btn_weekly_on'), 'set:weekly:toggle')
     .row()
-    .text(ctx.t('common.back'), 'settings');
+    .text(ctx.t('common.back'), 'set:group:notif');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }
@@ -654,7 +722,7 @@ export async function handleSettingsTextState(state, text, ctx) {
       .text(ctx.t('settings.btn_period_evening'), 'set:period:evening')
       .text(ctx.t('settings.btn_period_night'), 'set:period:night')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:notif');
 
     await ctx.api.editMessageText(ctx.chat.id, state.msgId, menuText, {
       parse_mode: 'Markdown',
@@ -709,7 +777,7 @@ export async function handleSettingsTextState(state, text, ctx) {
       .row()
       .text(ctx.t('settings.btn_digest_time', { time: dg.time }), 'set:digest:time')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:notif');
 
     await ctx.api.editMessageText(ctx.chat.id, state.msgId, menuText, {
       parse_mode: 'Markdown',
@@ -773,7 +841,7 @@ export async function handleSettingsTextState(state, text, ctx) {
       .row()
       .text(ctx.t('settings.btn_quiet_to', { time: qh.to }), 'set:quiet:to')
       .row()
-      .text(ctx.t('common.back'), 'settings');
+      .text(ctx.t('common.back'), 'set:group:notif');
 
     await ctx.api.editMessageText(ctx.chat.id, state.msgId, menuText, {
       parse_mode: 'Markdown',

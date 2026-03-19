@@ -161,6 +161,9 @@ export function registerIntakeHandlers(bot) {
           const newQty = Math.max(0, med.quantity - dose);
           await updateMedicine(log.medicine_id, { quantity: newQty });
 
+          // #28 Auto-add to shopping list when low stock
+          await checkAutoShoppingList(ctx, med, newQty);
+
           // #40 Auto-pause schedules when quantity reaches zero
           if (newQty <= 0) {
             const { data: activeScheds } = await supabase
@@ -281,6 +284,9 @@ export function registerIntakeHandlers(bot) {
           const newQty = Math.max(0, med.quantity - dose);
           await updateMedicine(log.medicine_id, { quantity: newQty });
 
+          // #28 Auto-add to shopping list when low stock
+          await checkAutoShoppingList(ctx, med, newQty);
+
           // #40 Auto-pause schedules when quantity reaches zero
           if (newQty <= 0) {
             const { data: activeScheds } = await supabase
@@ -331,6 +337,9 @@ export function registerIntakeHandlers(bot) {
             const dose = schedule?.dose_per_intake || 1;
             const newQty = Math.max(0, med.quantity - dose);
             await updateMedicine(log.medicine_id, { quantity: newQty });
+
+            // #28 Auto-add to shopping list when low stock
+            await checkAutoShoppingList(ctx, med, newQty);
 
             // #40 Auto-pause schedules when quantity reaches zero
             if (newQty <= 0) {

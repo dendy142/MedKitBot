@@ -8,77 +8,81 @@ import { getProfileDashboardLines } from './profiles.js';
 /**
  * Build profile completion data (#84)
  */
-async function getProfileCompletion(userId, settings) {
+async function getProfileCompletion(userId, settings, medkits) {
   const criteria = [];
   let done = 0;
   const total = 6;
 
-  // 1. Has medkit
-  const { count: medkitCount } = await supabase
-    .from('medkit_members')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', userId);
-  const hasMedkit = medkitCount > 0;
+  const hasMedkit = medkits.length > 0;
   criteria.push({ key: hasMedkit ? 'progress_medkit' : 'progress_no_medkit', done: hasMedkit });
   if (hasMedkit) done++;
 
-  // 2. Has medicine
   if (hasMedkit) {
-    const { data: memberships } = await supabase
-      .from('medkit_members')
-      .select('medkit_id')
-      .eq('user_id', userId);
-    const medkitIds = (memberships || []).map(m => m.medkit_id);
-    const { count: medCount } = await supabase
-      .from('medicines')
-      .select('*', { count: 'exact', head: true })
-      .in('medkit_id', medkitIds)
-      .eq('is_archived', false);
+    const medkitIds = medkits.map(m => m.id);
+
+    // Run all checks in parallel
+    const [{ count: medCount }, { count: schedCount }, { data: medsWithPhotos }, { count: profileCount }] = await Promise.all([
+      supabase
+        .from('medicines')
+        .select('*', { count: 'exact', head: true })
+        .in('medkit_id', medkitIds)
+        .eq('is_archived', false),
+      supabase
+        .from('schedules')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('status', 'active'),
+      supabase
+        .from('medicines')
+        .select('photo_file_ids')
+        .in('medkit_id', medkitIds)
+        .eq('is_archived', false)
+        .not('photo_file_ids', 'eq', '{}')
+        .limit(1),
+      supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId),
+    ]);
+
     const hasMed = medCount > 0;
     criteria.push({ key: hasMed ? 'progress_medicine' : 'progress_no_medicine', done: hasMed });
     if (hasMed) done++;
 
-    // 3. Has schedule
-    const { count: schedCount } = await supabase
-      .from('schedules')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('status', 'active');
     const hasSched = schedCount > 0;
     criteria.push({ key: hasSched ? 'progress_schedule' : 'progress_no_schedule', done: hasSched });
     if (hasSched) done++;
 
-    // 4. Has photo
-    const { data: medsWithPhotos } = await supabase
-      .from('medicines')
-      .select('photo_file_ids')
-      .in('medkit_id', medkitIds)
-      .eq('is_archived', false)
-      .not('photo_file_ids', 'eq', '{}')
-      .limit(1);
     const hasPhoto = medsWithPhotos && medsWithPhotos.length > 0;
     criteria.push({ key: hasPhoto ? 'progress_photo' : 'progress_no_photo', done: hasPhoto });
     if (hasPhoto) done++;
+
+    // 5. Timezone set
+    const hasTz = settings?.timezone && settings.timezone !== 'Europe/Moscow';
+    criteria.push({ key: hasTz ? 'progress_timezone' : 'progress_no_timezone', done: hasTz });
+    if (hasTz) done++;
+
+    // 6. Has profile
+    const hasProfile = profileCount > 0;
+    criteria.push({ key: hasProfile ? 'progress_profile' : 'progress_no_profile', done: hasProfile });
+    if (hasProfile) done++;
   } else {
     criteria.push({ key: 'progress_no_medicine', done: false });
     criteria.push({ key: 'progress_no_schedule', done: false });
     criteria.push({ key: 'progress_no_photo', done: false });
+
+    const hasTz = settings?.timezone && settings.timezone !== 'Europe/Moscow';
+    criteria.push({ key: hasTz ? 'progress_timezone' : 'progress_no_timezone', done: hasTz });
+    if (hasTz) done++;
+
+    const { count: profileCount } = await supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    const hasProfile = profileCount > 0;
+    criteria.push({ key: hasProfile ? 'progress_profile' : 'progress_no_profile', done: hasProfile });
+    if (hasProfile) done++;
   }
-
-  // 5. Timezone set (not default Moscow)
-  const hasTz = settings?.timezone && settings.timezone !== 'Europe/Moscow';
-  // Actually check from user row
-  criteria.push({ key: hasTz ? 'progress_timezone' : 'progress_no_timezone', done: hasTz });
-  if (hasTz) done++;
-
-  // 6. Has profile
-  const { count: profileCount } = await supabase
-    .from('profiles')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', userId);
-  const hasProfile = profileCount > 0;
-  criteria.push({ key: hasProfile ? 'progress_profile' : 'progress_no_profile', done: hasProfile });
-  if (hasProfile) done++;
 
   const pct = Math.round((done / total) * 100);
   return { pct, criteria, done, total };
@@ -88,9 +92,15 @@ async function getProfileCompletion(userId, settings) {
  * Build dashboard text for main menu
  */
 async function buildDashboard(userId, settings, t, dbUser) {
-  const medkits = await getUserMedkits(userId);
+  // Fetch medkits, shopping count, and intake logs in parallel
+  const [medkits, shopCount, intakeLogs] = await Promise.all([
+    getUserMedkits(userId),
+    countShoppingItems(userId),
+    getTodayIntakeLogs(userId, settings?.timezone || 'Europe/Moscow'),
+  ]);
   const medkitCount = medkits.length;
-  const shopCount = await countShoppingItems(userId);
+  const totalIntakes = intakeLogs.length;
+  const doneIntakes = intakeLogs.filter(l => l.status === 'taken').length;
 
   // Count expiring, expired, and low-stock medicines
   const thresholds = settings?.thresholds || { expiry_days: 30, low_stock_count: 5 };
@@ -106,53 +116,45 @@ async function buildDashboard(userId, settings, t, dbUser) {
     const thresholdDate = new Date(Date.now() + thresholds.expiry_days * 86400000);
     const thresholdDateStr = thresholdDate.toISOString().split('T')[0];
 
-    // Total expiring (includes expired + expiring soon) — used for summary line
-    const { count: expCount } = await supabase
-      .from('medicines')
-      .select('*', { count: 'exact', head: true })
-      .in('medkit_id', medkitIds)
-      .eq('is_archived', false)
-      .not('expiry_date', 'is', null)
-      .lte('expiry_date', thresholdDateStr);
+    // Run all medicine count queries in parallel
+    const [{ count: expCount }, { count: expiredC }, { count: soonCount }, { count: lowCount }] = await Promise.all([
+      supabase
+        .from('medicines')
+        .select('*', { count: 'exact', head: true })
+        .in('medkit_id', medkitIds)
+        .eq('is_archived', false)
+        .not('expiry_date', 'is', null)
+        .lte('expiry_date', thresholdDateStr),
+      supabase
+        .from('medicines')
+        .select('*', { count: 'exact', head: true })
+        .in('medkit_id', medkitIds)
+        .eq('is_archived', false)
+        .not('expiry_date', 'is', null)
+        .lte('expiry_date', todayStr),
+      supabase
+        .from('medicines')
+        .select('*', { count: 'exact', head: true })
+        .in('medkit_id', medkitIds)
+        .eq('is_archived', false)
+        .not('expiry_date', 'is', null)
+        .gt('expiry_date', todayStr)
+        .lte('expiry_date', thresholdDateStr),
+      supabase
+        .from('medicines')
+        .select('*', { count: 'exact', head: true })
+        .in('medkit_id', medkitIds)
+        .eq('is_archived', false)
+        .lte('quantity', thresholds.low_stock_count)
+        .gt('quantity', 0),
+    ]);
+
     expiringCount = expCount || 0;
-
-    // Expired (expiry_date <= today) — for attention banner
-    const { count: expiredC } = await supabase
-      .from('medicines')
-      .select('*', { count: 'exact', head: true })
-      .in('medkit_id', medkitIds)
-      .eq('is_archived', false)
-      .not('expiry_date', 'is', null)
-      .lte('expiry_date', todayStr);
     expiredCount = expiredC || 0;
-
-    // Expiring soon (today < expiry_date <= threshold) — for attention banner
-    const { count: soonCount } = await supabase
-      .from('medicines')
-      .select('*', { count: 'exact', head: true })
-      .in('medkit_id', medkitIds)
-      .eq('is_archived', false)
-      .not('expiry_date', 'is', null)
-      .gt('expiry_date', todayStr)
-      .lte('expiry_date', thresholdDateStr);
     expiringSoonCount = soonCount || 0;
-
-    const { count: lowCount } = await supabase
-      .from('medicines')
-      .select('*', { count: 'exact', head: true })
-      .in('medkit_id', medkitIds)
-      .eq('is_archived', false)
-      .lte('quantity', thresholds.low_stock_count)
-      .gt('quantity', 0);
     lowStockCount = lowCount || 0;
-
     hasAttention = expiredCount > 0 || expiringSoonCount > 0;
   }
-
-  // Intake stats for today
-  const intakeLogs = await getTodayIntakeLogs(userId, settings?.timezone || 'Europe/Moscow');
-  const totalIntakes = intakeLogs.length;
-  const doneIntakes = intakeLogs.filter(l => l.status === 'taken').length;
 
   let text = t('menu.title');
 
@@ -176,24 +178,24 @@ async function buildDashboard(userId, settings, t, dbUser) {
     }
   }
 
-  // #51 Dashboard profile lines
+  // Fetch profile dashboard lines and completion in parallel
   try {
-    const profileLines = await getProfileDashboardLines(userId, t);
+    const [profileLines, completion] = await Promise.all([
+      getProfileDashboardLines(userId, t).catch(() => ''),
+      getProfileCompletion(userId, dbUser, medkits).catch(() => null),
+    ]);
+
     if (profileLines) {
       text += '\n' + profileLines;
     }
-  } catch { /* ignore profile dashboard errors */ }
 
-  // Profile completion progress (#84)
-  try {
-    const { pct, criteria } = await getProfileCompletion(userId, dbUser);
-    if (pct < 100) {
-      text += '\n' + t('onboarding.progress_title', { pct }) + '\n';
-      for (const c of criteria) {
+    if (completion && completion.pct < 100) {
+      text += '\n' + t('onboarding.progress_title', { pct: completion.pct }) + '\n';
+      for (const c of completion.criteria) {
         text += t(`onboarding.${c.key}`) + '\n';
       }
     }
-  } catch { /* ignore profile completion errors */ }
+  } catch { /* ignore dashboard errors */ }
 
   return { text, hasAttention };
 }

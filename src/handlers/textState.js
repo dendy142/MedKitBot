@@ -390,7 +390,8 @@ export async function handleTextState(ctx) {
       return true;
     }
     if (result === 'handled') {
-      await clearState(ctx.dbUser.id);
+      // Profile handler manages its own state (setState for multi-step transitions,
+      // clearState for completed actions) — don't clear here
       return true;
     }
   }

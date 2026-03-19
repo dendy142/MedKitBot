@@ -226,9 +226,11 @@ async function showProfileCard(ctx, profileId) {
     text += ctx.t('profile.card_tags', { tags: profile.tags.join(', ') });
   }
 
-  // Medicine and schedule counts
-  const medCount = await countProfileMedicines(profileId);
-  const schedCount = await countProfileSchedules(profileId);
+  // Medicine and schedule counts (parallel)
+  const [medCount, schedCount] = await Promise.all([
+    countProfileMedicines(profileId),
+    countProfileSchedules(profileId),
+  ]);
   text += ctx.t('profile.card_medicines_count', { count: medCount });
   if (schedCount > 0) {
     text += ctx.t('profile.card_schedules_count', { count: schedCount });
@@ -496,46 +498,42 @@ export async function showStatsProfilePicker(ctx) {
 // ── Dashboard profiles (#51) ────────────────────────────────────────
 
 export async function getProfileDashboardLines(userId, t) {
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, name, icon')
-    .eq('user_id', userId);
-
-  if (!profiles || profiles.length === 0) return '';
-
-  let lines = '';
   const today = new Date().toISOString().split('T')[0];
 
-  for (const p of profiles) {
-    // Count today's intake logs for medicines linked to this profile
-    const { data: logs } = await supabase
-      .from('intake_logs')
-      .select('status')
-      .eq('user_id', userId)
-      .gte('planned_at', today + 'T00:00:00')
-      .lt('planned_at', today + 'T23:59:59');
-
-    // Get medicine IDs for this profile
-    const { data: medIds } = await supabase
+  // Fetch all needed data in parallel (3 queries instead of N*3)
+  const [{ data: profiles }, { data: allProfileMeds }, { data: todayLogs }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, name, icon')
+      .eq('user_id', userId),
+    supabase
       .from('medicines')
-      .select('id')
-      .eq('profile_id', p.id)
-      .eq('is_archived', false);
-
-    if (!medIds || medIds.length === 0) continue;
-
-    const medIdSet = new Set(medIds.map(m => m.id));
-
-    // Filter intake logs for these meds
-    const { data: profileLogs } = await supabase
+      .select('id, profile_id')
+      .eq('is_archived', false)
+      .not('profile_id', 'is', null),
+    supabase
       .from('intake_logs')
       .select('status, medicine_id')
       .eq('user_id', userId)
       .gte('planned_at', today + 'T00:00:00')
-      .lt('planned_at', today + 'T23:59:59');
+      .lt('planned_at', today + 'T23:59:59'),
+  ]);
 
-    if (!profileLogs) continue;
-    const relevant = profileLogs.filter(l => medIdSet.has(l.medicine_id));
+  if (!profiles || profiles.length === 0) return '';
+
+  // Index medicines by profile_id
+  const medsByProfile = {};
+  for (const m of (allProfileMeds || [])) {
+    if (!medsByProfile[m.profile_id]) medsByProfile[m.profile_id] = new Set();
+    medsByProfile[m.profile_id].add(m.id);
+  }
+
+  let lines = '';
+  for (const p of profiles) {
+    const medIdSet = medsByProfile[p.id];
+    if (!medIdSet || medIdSet.size === 0) continue;
+
+    const relevant = (todayLogs || []).filter(l => medIdSet.has(l.medicine_id));
     if (relevant.length === 0) continue;
 
     const taken = relevant.filter(l => l.status === 'taken').length;
@@ -950,10 +948,11 @@ export function registerProfileHandlers(bot) {
   bot.callbackQuery(/^profile:([0-9a-f-]+):delete$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const profileId = ctx.match[1];
-    const profile = await getProfile(profileId);
+    const [profile, medCount] = await Promise.all([
+      getProfile(profileId),
+      countProfileMedicines(profileId),
+    ]);
     if (!profile) return;
-
-    const medCount = await countProfileMedicines(profileId);
 
     let text;
     const keyboard = new InlineKeyboard();

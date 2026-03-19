@@ -3,6 +3,8 @@ import { createSchedule, getMedicineSchedules, getSchedule, updateScheduleStatus
 import { getMedicine } from '../db/queries/medicines.js';
 import { supabase } from '../db/supabase.js';
 import { formatQuantity } from '../utils/format.js';
+import { ensureExists } from '../utils/ensure.js';
+import { withRetry } from '../utils/retry.js';
 
 const DAY_VALUES = [1, 2, 3, 4, 5, 6, 0]; // ISO weekday to JS day
 
@@ -650,7 +652,7 @@ export function registerScheduleHandlers(bot) {
 
     // Force-create (skip conflict check)
     try {
-      await createSchedule({
+      await withRetry(() => createSchedule({
         medicineId: state.medId,
         userId: ctx.dbUser.id,
         timeMode: state.timeMode,
@@ -661,7 +663,7 @@ export function registerScheduleHandlers(bot) {
         durationType: state.durationType,
         durationValue: state.durationType === 'until_date' ? state.durationValue : (state.durationValue || null),
         startDate: new Date().toISOString().split('T')[0],
-      });
+      }));
 
       await clearWizardState(ctx.dbUser.id);
 
@@ -720,7 +722,7 @@ export function registerScheduleHandlers(bot) {
     }
 
     try {
-      await createSchedule({
+      await withRetry(() => createSchedule({
         medicineId: state.medId,
         userId: ctx.dbUser.id,
         timeMode: state.timeMode,
@@ -731,7 +733,7 @@ export function registerScheduleHandlers(bot) {
         durationType: state.durationType,
         durationValue: state.durationType === 'until_date' ? state.durationValue : (state.durationValue || null),
         startDate: new Date().toISOString().split('T')[0],
-      });
+      }));
 
       await clearWizardState(ctx.dbUser.id);
 
@@ -817,9 +819,10 @@ export function registerScheduleHandlers(bot) {
   // Delete schedule — confirm
   bot.callbackQuery(/^sched:([0-9a-f-]+):del$/, async (ctx) => {
     const schedId = ctx.match[1];
-    await ctx.answerCallbackQuery();
     const sched = await getSchedule(schedId);
-    if (!sched) return;
+    // #65 Stale callback guard
+    if (!await ensureExists(sched, ctx)) return;
+    await ctx.answerCallbackQuery();
 
     await ctx.editMessageText(
       ctx.t('schedule.delete_confirm'),

@@ -4,6 +4,7 @@ import { BOT_TOKEN, CRON_SECRET, MAX_SNOOZE } from '../../src/config.js';
 import { getPendingIntakeLogs, createIntakeLog } from '../../src/db/queries/intakeLogs.js';
 import { getUserActiveSchedules } from '../../src/db/queries/schedules.js';
 import { t } from '../../src/locales/index.js';
+import { log } from '../../src/utils/logger.js';
 
 /**
  * Get user's local "now" and "today" in their timezone
@@ -153,6 +154,10 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  // #79 Cron metrics
+  const startTime = Date.now();
+  let errors = 0;
+
   try {
     const bot = new Bot(BOT_TOKEN);
 
@@ -248,16 +253,25 @@ export default async function handler(req, res) {
 
       for (const [timeKey, logs] of Object.entries(logsByTime)) {
         try {
+          // #76 Idempotent cron — check if reminder already sent for these logs
+          const logIdsToCheck = logs.map(l => l.id);
+          const { count: alreadySent } = await supabase
+            .from('action_logs')
+            .select('*', { count: 'exact', head: true })
+            .eq('action', 'reminder_sent')
+            .in('entity_id', logIdsToCheck);
+          if (alreadySent > 0) continue;
+
           if (logs.length >= 2) {
             // Grouped notification (#44)
             let text = t('cron.reminder_grouped', lang);
             const logIds = [];
-            for (const log of logs) {
-              const medName = log.medicines?.name || t('cron.reminder_medicine', lang);
-              const dose = log.schedules?.dose_per_intake || 1;
+            for (const logEntry of logs) {
+              const medName = logEntry.medicines?.name || t('cron.reminder_medicine', lang);
+              const dose = logEntry.schedules?.dose_per_intake || 1;
               const unit = '';
-              text += t('cron.reminder_grouped_item', lang, { name: `${medName}${log.medicines?.dosage ? ' ' + log.medicines.dosage : ''}`, dose, unit });
-              logIds.push(log.id);
+              text += t('cron.reminder_grouped_item', lang, { name: `${medName}${logEntry.medicines?.dosage ? ' ' + logEntry.medicines.dosage : ''}`, dose, unit });
+              logIds.push(logEntry.id);
             }
 
             const keyboard = new InlineKeyboard()
@@ -268,33 +282,42 @@ export default async function handler(req, res) {
               parse_mode: 'Markdown',
               reply_markup: keyboard,
             });
+
+            // #76 Log reminder sent for each log
+            for (const logId of logIds) {
+              await supabase.from('action_logs').insert({ user_id: userId, action: 'reminder_sent', entity_type: 'intake_log', entity_id: logId });
+            }
             reminderCount += logs.length;
           } else {
             // Single notification (original behavior)
-            const log = logs[0];
-            const medName = log.medicines?.name || t('cron.reminder_medicine', lang);
-            const dose = log.schedules?.dose_per_intake || 1;
-            const medNotes = log.medicines?.notes;
+            const logEntry = logs[0];
+            const medName = logEntry.medicines?.name || t('cron.reminder_medicine', lang);
+            const dose = logEntry.schedules?.dose_per_intake || 1;
+            const medNotes = logEntry.medicines?.notes;
 
             let text = t('cron.reminder_title', lang);
-            text += `${medName}${log.medicines?.dosage ? ' ' + log.medicines.dosage : ''}\n`;
+            text += `${medName}${logEntry.medicines?.dosage ? ' ' + logEntry.medicines.dosage : ''}\n`;
             text += t('cron.reminder_dose', lang, { dose, unit: '' }) + '\n';
 
             if (medNotes) text += t('cron.reminder_notes', lang, { notes: medNotes }) + '\n';
 
             const keyboard = new InlineKeyboard()
-              .text(t('cron.btn_take', lang), `intake:${log.id}:take_remind`)
-              .text(t('cron.btn_snooze', lang), `intake:${log.id}:snooze`)
-              .text(t('cron.btn_skip', lang), `intake:${log.id}:skip_remind`);
+              .text(t('cron.btn_take', lang), `intake:${logEntry.id}:take_remind`)
+              .text(t('cron.btn_snooze', lang), `intake:${logEntry.id}:snooze`)
+              .text(t('cron.btn_skip', lang), `intake:${logEntry.id}:skip_remind`);
 
             await bot.api.sendMessage(telegramId, text, {
               parse_mode: 'Markdown',
               reply_markup: keyboard,
             });
+
+            // #76 Log reminder sent
+            await supabase.from('action_logs').insert({ user_id: userId, action: 'reminder_sent', entity_type: 'intake_log', entity_id: logEntry.id });
             reminderCount++;
           }
         } catch (e) {
-          console.error(`Failed to send reminder to user ${userId}:`, e.message);
+          errors++;
+          log('error', { cron: 'reminders', action: 'send_reminder', userId, error: e.message });
         }
       }
     }
@@ -318,13 +341,19 @@ export default async function handler(req, res) {
       }
     }
 
+    // #79 Cron metrics
+    const duration = Date.now() - startTime;
+    log('info', { cron: 'reminders', duration_ms: duration, generated: generatedCount, reminders: reminderCount, users: userIds.length, errors });
+
     return res.json({
       ok: true,
       generated: generatedCount,
       reminders: reminderCount,
+      duration_ms: duration,
     });
   } catch (error) {
-    console.error('Reminders cron error:', error);
+    const duration = Date.now() - startTime;
+    log('error', { cron: 'reminders', duration_ms: duration, error: error.message });
     return res.status(500).json({ error: error.message });
   }
 }

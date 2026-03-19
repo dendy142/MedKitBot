@@ -2,12 +2,17 @@ import { supabase } from '../../src/db/supabase.js';
 import { Bot } from 'grammy';
 import { BOT_TOKEN, CRON_SECRET } from '../../src/config.js';
 import { t } from '../../src/locales/index.js';
+import { log } from '../../src/utils/logger.js';
 
 export default async function handler(req, res) {
   // Verify cron secret
   if (req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+
+  // #79 Cron metrics
+  const startTime = Date.now();
+  let errors = 0;
 
   try {
     const bot = new Bot(BOT_TOKEN);
@@ -98,7 +103,8 @@ export default async function handler(req, res) {
           details: { count: uniqueMeds.length },
         });
       } catch (e) {
-        console.error(`Failed to notify user ${userId}:`, e.message);
+        errors++;
+        log('error', { cron: 'expiry-check', action: 'notify_expiry', userId, error: e.message });
       }
     }
 
@@ -233,16 +239,22 @@ export default async function handler(req, res) {
 
               lowStockNotified++;
             } catch (e) {
-              console.error(`Failed to send low stock warning to user ${userId}:`, e.message);
+              errors++;
+              log('error', { cron: 'expiry-check', action: 'notify_low_stock', userId, error: e.message });
             }
           }
         }
       }
     }
 
-    return res.json({ ok: true, notified, lowStockNotified });
+    // #79 Cron metrics
+    const duration = Date.now() - startTime;
+    log('info', { cron: 'expiry-check', duration_ms: duration, notified, lowStockNotified, errors });
+
+    return res.json({ ok: true, notified, lowStockNotified, duration_ms: duration });
   } catch (error) {
-    console.error('Expiry check error:', error);
+    const duration = Date.now() - startTime;
+    log('error', { cron: 'expiry-check', duration_ms: duration, error: error.message });
     return res.status(500).json({ error: error.message });
   }
 }

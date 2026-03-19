@@ -1,7 +1,10 @@
 import { InlineKeyboard, InputFile } from 'grammy';
 import { getUserMedkits } from '../db/queries/medkits.js';
 import { getMedkitMedicines } from '../db/queries/medicines.js';
+import { getUserActiveSchedules } from '../db/queries/schedules.js';
 import { formatDate } from '../utils/format.js';
+import { supabase } from '../db/supabase.js';
+import { DEFAULT_SETTINGS } from '../config.js';
 
 /**
  * Escape a CSV field (semicolon-separated): wrap in quotes if needed
@@ -53,6 +56,22 @@ function generateCsv(medicines, ctx) {
 }
 
 /**
+ * Show export format selection for a target (medkit id or 'all')
+ */
+async function showExportFormatMenu(ctx, target) {
+  const keyboard = new InlineKeyboard()
+    .text('📄 CSV', `export:csv:${target}`)
+    .text(ctx.t('pdf.btn_export_pdf'), `export:pdf:${target}`)
+    .row()
+    .text(ctx.t('common.back'), 'export');
+
+  await ctx.editMessageText(
+    ctx.t('export_import.export_title'),
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+}
+
+/**
  * Show export medkit selection
  */
 async function showExportMenu(ctx) {
@@ -68,11 +87,14 @@ async function showExportMenu(ctx) {
 
   const keyboard = new InlineKeyboard();
   for (const mk of medkits) {
-    keyboard.text(`📦 ${mk.name}`, `export:${mk.id}`).row();
+    keyboard.text(`📦 ${mk.name}`, `export:select:${mk.id}`).row();
   }
   if (medkits.length > 1) {
-    keyboard.text(ctx.t('export_import.export_all'), 'export:all').row();
+    keyboard.text(ctx.t('export_import.export_all'), 'export:select:all').row();
   }
+  // Backup and schedule export
+  keyboard.text(ctx.t('backup.btn_export'), 'backup:export').row();
+  keyboard.text(ctx.t('schedule_export.btn_export'), 'export:schedules').row();
   keyboard.text(ctx.t('common.back'), 'settings');
 
   await ctx.editMessageText(ctx.t('export_import.export_title'), {
@@ -82,12 +104,13 @@ async function showExportMenu(ctx) {
 }
 
 /**
- * Handle export for a specific medkit or all
+ * Gather medicines for export
  */
-async function handleExportSelect(ctx, target) {
+async function gatherMedicines(ctx, target) {
   const medkits = await getUserMedkits(ctx.dbUser.id);
   let allMedicines = [];
   let exportName = '';
+  let medkitName = '';
 
   if (target === 'all') {
     for (const mk of medkits) {
@@ -95,15 +118,29 @@ async function handleExportSelect(ctx, target) {
       allMedicines.push(...meds);
     }
     exportName = 'all_medkits';
+    medkitName = 'Все аптечки';
   } else {
     const mk = medkits.find((m) => m.id === target);
-    if (!mk) {
-      await ctx.answerCallbackQuery(ctx.t('addmed.medkit_not_found'));
-      return;
-    }
+    if (!mk) return null;
     allMedicines = await getMedkitMedicines(target);
     exportName = mk.name.replace(/[^a-zA-Zа-яА-ЯёЁ0-9_]/g, '_');
+    medkitName = mk.name;
   }
+
+  return { allMedicines, exportName, medkitName };
+}
+
+/**
+ * Handle CSV export
+ */
+async function handleCsvExport(ctx, target) {
+  const result = await gatherMedicines(ctx, target);
+  if (!result) {
+    await ctx.answerCallbackQuery(ctx.t('addmed.medkit_not_found'));
+    return;
+  }
+
+  const { allMedicines, exportName } = result;
 
   if (allMedicines.length === 0) {
     await ctx.answerCallbackQuery(ctx.t('export_import.export_no_medicines'));
@@ -124,6 +161,181 @@ async function handleExportSelect(ctx, target) {
 }
 
 /**
+ * #97 Handle PDF export — generates a formatted text file with table layout
+ * (pdfkit cannot render Cyrillic without a TTF font; we send a .txt document)
+ */
+async function handlePdfExport(ctx, target) {
+  const result = await gatherMedicines(ctx, target);
+  if (!result) {
+    await ctx.answerCallbackQuery(ctx.t('addmed.medkit_not_found'));
+    return;
+  }
+
+  const { allMedicines, exportName, medkitName } = result;
+
+  if (allMedicines.length === 0) {
+    await ctx.answerCallbackQuery(ctx.t('export_import.export_no_medicines'));
+    await ctx.editMessageText(ctx.t('export_import.export_empty'), {
+      reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'export'),
+    });
+    return;
+  }
+
+  // Build formatted text document (Cyrillic-friendly fallback)
+  const dateFormat = ctx.dbUser.settings?.display?.date_format || 'DD.MM.YYYY';
+  const now = new Date();
+  const generatedDate = formatDate(now, dateFormat);
+
+  let content = `╔══════════════════════════════════════════════════╗\n`;
+  content += `║  ${ctx.t('pdf.header', { name: medkitName }).padEnd(48)}║\n`;
+  content += `╚══════════════════════════════════════════════════╝\n\n`;
+
+  // Table header
+  const colName = ctx.t('pdf.col_name').padEnd(20);
+  const colDosage = ctx.t('pdf.col_dosage').padEnd(12);
+  const colCategory = ctx.t('pdf.col_category').padEnd(16);
+  const colExpiry = ctx.t('pdf.col_expiry').padEnd(12);
+  const colQty = ctx.t('pdf.col_quantity').padEnd(8);
+  content += `${colName}${colDosage}${colCategory}${colExpiry}${colQty}\n`;
+  content += `${'─'.repeat(68)}\n`;
+
+  for (const m of allMedicines) {
+    const name = (m.name || '').substring(0, 19).padEnd(20);
+    const dosage = (m.dosage || '—').substring(0, 11).padEnd(12);
+    const category = (m.category || '—').substring(0, 15).padEnd(16);
+    const expiry = m.expiry_date ? formatExpiryForCsv(m.expiry_date).padEnd(12) : '—'.padEnd(12);
+    const qty = String(m.quantity || 0).padEnd(8);
+    content += `${name}${dosage}${category}${expiry}${qty}\n`;
+  }
+
+  content += `${'─'.repeat(68)}\n`;
+  content += `\n${ctx.t('pdf.footer', { date: generatedDate })}\n`;
+
+  const buffer = Buffer.from('\ufeff' + content, 'utf-8');
+  const inputFile = new InputFile(buffer, `${exportName}_${Date.now()}.txt`);
+
+  await ctx.answerCallbackQuery();
+  await ctx.replyWithDocument(inputFile, {
+    caption: ctx.t('export_import.export_done', { count: allMedicines.length }),
+  });
+}
+
+/**
+ * #99 Export schedules as formatted text
+ */
+async function handleScheduleExport(ctx) {
+  const schedules = await getUserActiveSchedules(ctx.dbUser.id);
+
+  if (!schedules || schedules.length === 0) {
+    await ctx.answerCallbackQuery(ctx.t('schedule_export.empty'));
+    return;
+  }
+
+  // Group by time
+  const byTime = {};
+  for (const sched of schedules) {
+    const time = sched.time_value || '00:00';
+    if (!byTime[time]) byTime[time] = [];
+    byTime[time].push(sched);
+  }
+
+  let text = ctx.t('schedule_export.title');
+  const times = Object.keys(byTime).sort();
+
+  for (const time of times) {
+    // Determine period label
+    let period = time;
+    const hour = parseInt(time.split(':')[0], 10);
+    if (hour >= 5 && hour < 12) period = '🌅 Утро';
+    else if (hour >= 12 && hour < 17) period = '☀️ День';
+    else if (hour >= 17 && hour < 22) period = '🌆 Вечер';
+    else period = '🌙 Ночь';
+
+    text += ctx.t('schedule_export.time_group', { period, time });
+    for (const sched of byTime[time]) {
+      const name = sched.medicines?.name || '?';
+      const dosage = sched.medicines?.dosage || '';
+      const dose = sched.dose_per_intake || 1;
+      const unit = sched.medicines?.quantity_unit || ctx.t('intake.default_unit');
+      text += ctx.t('schedule_export.item', { name, dosage, dose, unit });
+    }
+    text += '\n';
+  }
+
+  text += ctx.t('schedule_export.footer');
+
+  await ctx.answerCallbackQuery();
+  await ctx.reply(text);
+}
+
+/**
+ * #100 Full JSON backup export
+ */
+async function handleBackupExport(ctx) {
+  const medkits = await getUserMedkits(ctx.dbUser.id);
+  const backup = {
+    version: 1,
+    exported_at: new Date().toISOString(),
+    user: {
+      timezone: ctx.dbUser.timezone,
+      settings: ctx.dbUser.settings || DEFAULT_SETTINGS,
+    },
+    medkits: [],
+  };
+
+  for (const mk of medkits) {
+    const medicines = await getMedkitMedicines(mk.id);
+    const medkitData = {
+      name: mk.name,
+      medicines: [],
+    };
+
+    for (const med of medicines) {
+      // Get schedules for this medicine
+      const { data: schedules } = await supabase
+        .from('schedules')
+        .select('*')
+        .eq('medicine_id', med.id);
+
+      medkitData.medicines.push({
+        name: med.name,
+        dosage: med.dosage,
+        category: med.category,
+        tags: med.tags,
+        expiry_date: med.expiry_date,
+        quantity: med.quantity,
+        quantity_unit: med.quantity_unit,
+        initial_quantity: med.initial_quantity,
+        notes: med.notes,
+        is_favorite: med.is_favorite,
+        photo_file_ids: med.photo_file_ids,
+        schedules: (schedules || []).map(s => ({
+          time_mode: s.time_mode,
+          time_value: s.time_value,
+          dose_per_intake: s.dose_per_intake,
+          frequency: s.frequency,
+          frequency_days: s.frequency_days,
+          duration_type: s.duration_type,
+          duration_value: s.duration_value,
+          status: s.status,
+        })),
+      });
+    }
+
+    backup.medkits.push(medkitData);
+  }
+
+  const json = JSON.stringify(backup, null, 2);
+  const buffer = Buffer.from(json, 'utf-8');
+  const inputFile = new InputFile(buffer, `medkit_backup_${Date.now()}.json`);
+
+  await ctx.answerCallbackQuery();
+  await ctx.replyWithDocument(inputFile, {
+    caption: ctx.t('backup.export_done'),
+  });
+}
+
+/**
  * Register export handlers
  */
 export function registerExportHandlers(bot) {
@@ -132,8 +344,38 @@ export function registerExportHandlers(bot) {
     await showExportMenu(ctx);
   });
 
-  bot.callbackQuery(/^export:(.+)$/, async (ctx) => {
+  // Medkit selected — show format choice
+  bot.callbackQuery(/^export:select:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
     const target = ctx.match[1];
-    await handleExportSelect(ctx, target);
+    await showExportFormatMenu(ctx, target);
+  });
+
+  // CSV export
+  bot.callbackQuery(/^export:csv:(.+)$/, async (ctx) => {
+    const target = ctx.match[1];
+    await handleCsvExport(ctx, target);
+  });
+
+  // #97 PDF/TXT export
+  bot.callbackQuery(/^export:pdf:(.+)$/, async (ctx) => {
+    const target = ctx.match[1];
+    await handlePdfExport(ctx, target);
+  });
+
+  // #99 Schedule export
+  bot.callbackQuery('export:schedules', async (ctx) => {
+    await handleScheduleExport(ctx);
+  });
+
+  // #100 Backup export
+  bot.callbackQuery('backup:export', async (ctx) => {
+    await handleBackupExport(ctx);
+  });
+
+  // Legacy: direct export:ID still works (defaults to CSV)
+  bot.callbackQuery(/^export:([0-9a-f-]+)$/, async (ctx) => {
+    const target = ctx.match[1];
+    await handleCsvExport(ctx, target);
   });
 }

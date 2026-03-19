@@ -5,14 +5,19 @@ import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUnti
 import { logAction, logMedicineChange } from '../middleware/logging.js';
 import { getMedicineHistory } from '../db/queries/actionLogs.js';
 import { supabase } from '../db/supabase.js';
+import { ensureExists } from '../utils/ensure.js';
+import { checkMedkitRole } from '../middleware/checkRole.js';
 
 /**
  * Show medicine card (full view)
  */
 async function showMedicineCard(ctx, medicineId) {
   const med = await getMedicine(medicineId);
+  // #65 Stale callback guard
   if (!med) {
-    if (ctx.callbackQuery) await ctx.answerCallbackQuery(ctx.t('medicine.not_found'));
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery({ text: ctx.t('common.stale_data'), show_alert: true });
+    }
     return;
   }
 
@@ -210,6 +215,12 @@ export function registerMedicineHandlers(bot) {
   // Archive medicine — confirmed
   bot.callbackQuery(/^med:([0-9a-f-]+):archive:confirm$/, async (ctx) => {
     const med = await getMedicine(ctx.match[1]);
+    // #65 Stale callback guard
+    if (!await ensureExists(med, ctx)) return;
+    // #73 Permission check — need editor role
+    if (!await checkMedkitRole(med.medkit_id, ctx.dbUser.id, 'editor')) {
+      return ctx.answerCallbackQuery({ text: ctx.t('common.insufficient_rights'), show_alert: true });
+    }
     await archiveMedicine(ctx.match[1]);
     await logAction(ctx.dbUser.id, 'archive', 'medicine', ctx.match[1]);
     await ctx.answerCallbackQuery(ctx.t('medicine.archive_toast'));
@@ -288,7 +299,12 @@ export function registerMedicineHandlers(bot) {
   bot.callbackQuery(/^med:([0-9a-f-]+):edit$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const med = await getMedicine(ctx.match[1]);
-    if (!med) return;
+    // #65 Stale callback guard
+    if (!await ensureExists(med, ctx)) return;
+    // #73 Permission check — need editor role
+    if (!await checkMedkitRole(med.medkit_id, ctx.dbUser.id, 'editor')) {
+      return ctx.answerCallbackQuery({ text: ctx.t('common.insufficient_rights'), show_alert: true });
+    }
 
     await ctx.editMessageText(
       ctx.t('medicine.edit_title', { name: med.name }),

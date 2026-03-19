@@ -385,5 +385,46 @@ export async function handleTextState(ctx) {
     }
   }
 
+  // #104 Course creation text state
+  if (state.action === 'create_course') {
+    const result = await handleCourseTextState(state, text, ctx);
+    if (result === 'handled') {
+      await clearState(ctx.dbUser.id);
+      return true;
+    }
+  }
+
+  // #106 Shopping custom quantity text state
+  if (state.action === 'shop_add_qty') {
+    const num = parseInt(text, 10);
+    if (!num || num < 1 || num > 999) {
+      await editBotMsg(ctx, msgId,
+        ctx.t('addmed.quantity_invalid'),
+        new InlineKeyboard().text(ctx.t('common.cancel'), `med:${state.medId}`)
+      );
+      return true;
+    }
+    await clearState(ctx.dbUser.id);
+    const { getMedicine } = await import('../db/queries/medicines.js');
+    const med = await getMedicine(state.medId);
+    if (!med) return true;
+    await supabase
+      .from('shopping_list')
+      .insert({
+        user_id: ctx.dbUser.id,
+        medicine_id: med.id,
+        medkit_id: med.medkit_id,
+        name: med.name,
+        quantity: num,
+      });
+    await editBotMsg(ctx, msgId,
+      ctx.t('medicine.added_to_shop', { name: med.name }),
+      new InlineKeyboard()
+        .text(ctx.t('medicine.btn_to_shop'), 'shopping')
+        .text(ctx.t('common.back'), `med:${med.id}`)
+    );
+    return true;
+  }
+
   return false;
 }

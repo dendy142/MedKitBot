@@ -1,7 +1,8 @@
 import { InlineKeyboard } from 'grammy';
 import { supabase } from '../db/supabase.js';
-import { getUserMedkits } from '../db/queries/medkits.js';
+import { getUserMedkits, createMedkit } from '../db/queries/medkits.js';
 import { createMedicine } from '../db/queries/medicines.js';
+import { createSchedule } from '../db/queries/schedules.js';
 import { parseDate } from '../utils/format.js';
 import { BOT_TOKEN } from '../config.js';
 
@@ -66,7 +67,10 @@ function parseCsv(text) {
 async function showImportMenu(ctx) {
   const text = ctx.t('export_import.import_title');
 
-  const keyboard = new InlineKeyboard().text(ctx.t('common.back'), 'settings');
+  const keyboard = new InlineKeyboard()
+    .text(ctx.t('backup.btn_import_json'), 'import:json')
+    .row()
+    .text(ctx.t('common.back'), 'settings');
 
   let msgId;
   if (ctx.callbackQuery) {
@@ -82,17 +86,24 @@ async function showImportMenu(ctx) {
 }
 
 /**
- * Handle document upload for import
+ * Handle document upload for import (CSV or JSON)
  */
 export async function handleImportDocument(ctx) {
   const state = await getState(ctx.dbUser.id);
-  if (!state || state.action !== 'import_csv') return false;
-
   const doc = ctx.message?.document;
   if (!doc) return false;
 
-  // Verify it's a CSV or text file
   const fileName = doc.file_name || '';
+
+  // #100 JSON backup import
+  if (fileName.endsWith('.json') || (state && state.action === 'import_json')) {
+    return await handleJsonImport(ctx, state);
+  }
+
+  // CSV import
+  if (!state || state.action !== 'import_csv') return false;
+
+  // Verify it's a CSV or text file
   const isCsv = fileName.endsWith('.csv') || fileName.endsWith('.txt') || (doc.mime_type && doc.mime_type.includes('text'));
   if (!isCsv) {
     await deleteUserMsg(ctx);
@@ -184,6 +195,193 @@ export async function handleImportDocument(ctx) {
 }
 
 /**
+ * #100 Handle JSON backup import
+ */
+async function handleJsonImport(ctx, state) {
+  await deleteUserMsg(ctx);
+
+  const file = await ctx.getFile();
+  const url = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+  const response = await fetch(url);
+  const text = await response.text();
+
+  let backup;
+  try {
+    backup = JSON.parse(text);
+  } catch {
+    await clearState(ctx.dbUser.id);
+    await ctx.reply(ctx.t('backup.import_invalid'), {
+      reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'settings'),
+    });
+    return true;
+  }
+
+  // Validate structure
+  if (!backup || !backup.version || !Array.isArray(backup.medkits)) {
+    await clearState(ctx.dbUser.id);
+    await ctx.reply(ctx.t('backup.import_invalid'), {
+      reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'settings'),
+    });
+    return true;
+  }
+
+  // Count entities
+  let medkitCount = backup.medkits.length;
+  let medicineCount = 0;
+  let scheduleCount = 0;
+  for (const mk of backup.medkits) {
+    medicineCount += (mk.medicines || []).length;
+    for (const med of (mk.medicines || [])) {
+      scheduleCount += (med.schedules || []).length;
+    }
+  }
+
+  // Store backup for confirmation
+  await setState(ctx.dbUser.id, {
+    action: 'import_json_confirm',
+    backup,
+    msgId: state?.msgId || null,
+  });
+
+  const confirmText = ctx.t('backup.import_confirm', {
+    medkits: medkitCount,
+    medicines: medicineCount,
+    schedules: scheduleCount,
+  });
+
+  await ctx.reply(confirmText, {
+    parse_mode: 'Markdown',
+    reply_markup: new InlineKeyboard()
+      .text(ctx.t('common.confirm'), 'import:json:confirm')
+      .text(ctx.t('common.cancel'), 'import:cancel'),
+  });
+
+  return true;
+}
+
+/**
+ * Execute JSON backup import
+ */
+async function executeJsonImport(ctx) {
+  const state = await getState(ctx.dbUser.id);
+  if (!state || state.action !== 'import_json_confirm' || !state.backup) {
+    await ctx.answerCallbackQuery(ctx.t('export_import.import_session_expired'));
+    return;
+  }
+
+  await ctx.answerCallbackQuery();
+  const backup = state.backup;
+
+  let createdMedkits = 0;
+  let createdMedicines = 0;
+  let createdSchedules = 0;
+  let errors = 0;
+
+  for (const mkData of backup.medkits) {
+    try {
+      const medkit = await createMedkit(mkData.name, ctx.dbUser.id);
+      createdMedkits++;
+
+      for (const medData of (mkData.medicines || [])) {
+        try {
+          const medicine = await createMedicine({
+            medkitId: medkit.id,
+            name: medData.name,
+            dosage: medData.dosage,
+            category: medData.category,
+            expiryDate: medData.expiry_date,
+            quantity: medData.quantity || 0,
+            quantityUnit: medData.quantity_unit || 'шт',
+            tags: medData.tags || [],
+            notes: medData.notes,
+            photoFileIds: medData.photo_file_ids || [],
+          });
+          createdMedicines++;
+
+          for (const schedData of (medData.schedules || [])) {
+            try {
+              await createSchedule({
+                medicineId: medicine.id,
+                userId: ctx.dbUser.id,
+                timeMode: schedData.time_mode,
+                timeValue: schedData.time_value,
+                dosePerIntake: schedData.dose_per_intake || 1,
+                frequency: schedData.frequency || 'daily',
+                frequencyDays: schedData.frequency_days || [],
+                durationType: schedData.duration_type || 'indefinite',
+                durationValue: schedData.duration_value || null,
+                startDate: new Date().toISOString().split('T')[0],
+              });
+              createdSchedules++;
+            } catch (e) {
+              console.error('Backup import schedule error:', e);
+              errors++;
+            }
+          }
+        } catch (e) {
+          console.error('Backup import medicine error:', e);
+          errors++;
+        }
+      }
+    } catch (e) {
+      console.error('Backup import medkit error:', e);
+      errors++;
+    }
+  }
+
+  await clearState(ctx.dbUser.id);
+
+  let resultText = ctx.t('backup.import_done', {
+    medkits: createdMedkits,
+    medicines: createdMedicines,
+    schedules: createdSchedules,
+  });
+  if (errors > 0) {
+    resultText += ctx.t('backup.import_errors', { count: errors });
+  }
+
+  await ctx.editMessageText(resultText, {
+    parse_mode: 'Markdown',
+    reply_markup: new InlineKeyboard()
+      .text(ctx.t('common.main_menu'), 'main_menu'),
+  });
+}
+
+/**
+ * #98 Handle photo outside wizard — offer to start addMedicine
+ */
+export async function handlePhotoImportOffer(ctx) {
+  // Check if user is not in any active wizard
+  const addmedState = await supabase
+    .from('sessions')
+    .select('value')
+    .eq('key', `addmed:${ctx.dbUser.id}`)
+    .single();
+
+  const textState = await getState(ctx.dbUser.id);
+
+  // If user is in a wizard, don't intercept
+  if (addmedState.data || textState) return false;
+
+  // Save photo file_id and offer
+  const photo = ctx.message.photo;
+  const fileId = photo[photo.length - 1].file_id;
+
+  await setState(ctx.dbUser.id, {
+    action: 'photo_import_offer',
+    fileId,
+  });
+
+  await ctx.reply(ctx.t('photo_import.offer'), {
+    reply_markup: new InlineKeyboard()
+      .text(ctx.t('photo_import.btn_yes'), `photo_import:yes:${fileId}`)
+      .text(ctx.t('photo_import.btn_no'), 'photo_import:no'),
+  });
+
+  return true;
+}
+
+/**
  * Register import handlers
  */
 export function registerImportHandlers(bot) {
@@ -191,6 +389,72 @@ export function registerImportHandlers(bot) {
   bot.callbackQuery('import', async (ctx) => {
     await ctx.answerCallbackQuery();
     await showImportMenu(ctx);
+  });
+
+  // #100 JSON import — show instructions
+  bot.callbackQuery('import:json', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const msg = await ctx.editMessageText(ctx.t('backup.import_send_json'), {
+      parse_mode: 'Markdown',
+      reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'import'),
+    });
+    await setState(ctx.dbUser.id, {
+      action: 'import_json',
+      msgId: msg.message_id,
+    });
+  });
+
+  // #100 JSON import — confirm
+  bot.callbackQuery('import:json:confirm', async (ctx) => {
+    await executeJsonImport(ctx);
+  });
+
+  // #98 Photo import — yes
+  bot.callbackQuery(/^photo_import:yes:(.+)$/, async (ctx) => {
+    const fileId = ctx.match[1];
+    await ctx.answerCallbackQuery();
+    await clearState(ctx.dbUser.id);
+
+    // Start addMedicine wizard with photo pre-attached
+    const medkits = await getUserMedkits(ctx.dbUser.id);
+    if (medkits.length === 0) {
+      await ctx.editMessageText(ctx.t('export_import.export_no_medkits'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'main_menu'),
+      });
+      return;
+    }
+
+    // If only one medkit, start directly; otherwise show selection
+    if (medkits.length === 1) {
+      const { startAddMedicine } = await import('./addMedicine.js');
+      await startAddMedicine(ctx, medkits[0].id, { prePhotoFileId: fileId });
+    } else {
+      const keyboard = new InlineKeyboard();
+      for (const mk of medkits) {
+        keyboard.text(`📦 ${mk.name}`, `photo_import:medkit:${mk.id}:${fileId}`).row();
+      }
+      keyboard.text(ctx.t('common.cancel'), 'main_menu');
+      await ctx.editMessageText(ctx.t('export_import.import_choose_medkit'), {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard,
+      });
+    }
+  });
+
+  // #98 Photo import — select medkit
+  bot.callbackQuery(/^photo_import:medkit:([0-9a-f-]+):(.+)$/, async (ctx) => {
+    const medkitId = ctx.match[1];
+    const fileId = ctx.match[2];
+    await ctx.answerCallbackQuery();
+    const { startAddMedicine } = await import('./addMedicine.js');
+    await startAddMedicine(ctx, medkitId, { prePhotoFileId: fileId });
+  });
+
+  // #98 Photo import — no
+  bot.callbackQuery('photo_import:no', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await clearState(ctx.dbUser.id);
+    try { await ctx.deleteMessage(); } catch { /* ignore */ }
   });
 
   // Cancel import

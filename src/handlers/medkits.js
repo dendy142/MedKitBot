@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getUserMedkits, getMedkit, createMedkit, renameMedkit, deleteMedkit, countMedkitMedicines } from '../db/queries/medkits.js';
 import { getMedkitMedicines } from '../db/queries/medicines.js';
 import { addPagination, paginateItems } from '../keyboards/pagination.js';
-import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil } from '../utils/format.js';
+import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil, truncate } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
 import { startAddMedicine } from './addMedicine.js';
 import { supabase } from '../db/supabase.js';
@@ -33,10 +33,38 @@ async function showMedkitList(ctx, page = 0) {
 
   const keyboard = new InlineKeyboard();
 
+  const settings = ctx.dbUser.settings || {};
+  const thresholdDays = settings.thresholds?.expiry_days || 30;
+  const lowStockCount = settings.thresholds?.low_stock_count || 5;
+  const lowStockPercent = settings.thresholds?.low_stock_percent || 20;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const thresholdDate = new Date();
+  thresholdDate.setDate(thresholdDate.getDate() + thresholdDays);
+  const thresholdStr = thresholdDate.toISOString().split('T')[0];
+
   for (const mk of pageItems) {
-    const count = await countMedkitMedicines(mk.id);
+    const { data: meds } = await supabase
+      .from('medicines')
+      .select('id, expiry_date, quantity, initial_quantity')
+      .eq('medkit_id', mk.id)
+      .eq('is_archived', false);
+
+    const medCount = (meds || []).length;
+    let problemCount = 0;
+    for (const m of (meds || [])) {
+      if (m.expiry_date && m.expiry_date <= thresholdStr) {
+        problemCount++;
+      } else if (m.quantity <= lowStockCount) {
+        problemCount++;
+      } else if (m.initial_quantity > 0 && (m.quantity / m.initial_quantity) * 100 <= lowStockPercent) {
+        problemCount++;
+      }
+    }
+
     const shared = mk.isShared ? ' 👥' : '';
-    keyboard.text(`${mk.name} (${count})${shared}`, `medkit:${mk.id}`).row();
+    const name = truncate(mk.name, 20);
+    const problemLabel = problemCount > 0 ? `, ⚠️ ${problemCount}` : '';
+    keyboard.text(`🧰 ${name} (${medCount} 💊${problemLabel})${shared}`, `medkit:${mk.id}`).row();
   }
 
   addPagination(keyboard, page, medkits.length, 'medkits');
@@ -266,7 +294,7 @@ export function registerMedkitHandlers(bot) {
     );
   });
 
-  // Apply sort (temporary — changes display sort for this view)
+  // Apply sort (persisted to user settings)
   bot.callbackQuery(/^medkit:([0-9a-f-]+):sort:(\w+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const medkitId = ctx.match[1];
@@ -276,6 +304,13 @@ export function registerMedkitHandlers(bot) {
     if (!medkit) return;
 
     const settings = ctx.dbUser.settings || {};
+
+    // Persist sort preference
+    await supabase.from('users').update({
+      settings: { ...settings, display: { ...settings.display, default_sort: sortBy } }
+    }).eq('id', ctx.dbUser.id);
+    // Update in-memory so subsequent reads in this request see it
+    ctx.dbUser.settings = { ...settings, display: { ...settings.display, default_sort: sortBy } };
 
     let medicines;
     if (sortBy === 'problems') {

@@ -12,24 +12,49 @@ async function buildDashboard(userId, settings, t) {
   const medkitCount = medkits.length;
   const shopCount = await countShoppingItems(userId);
 
-  // Count expiring and low-stock medicines
+  // Count expiring, expired, and low-stock medicines
   const thresholds = settings?.thresholds || { expiry_days: 30, low_stock_count: 5 };
   let expiringCount = 0;
   let lowStockCount = 0;
+  let expiredCount = 0;
+  let expiringSoonCount = 0;
 
   if (medkitCount > 0) {
     const medkitIds = medkits.map(m => m.id);
-    const now = new Date();
-    const thresholdDate = new Date(now.getTime() + thresholds.expiry_days * 86400000);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const thresholdDate = new Date(Date.now() + thresholds.expiry_days * 86400000);
+    const thresholdDateStr = thresholdDate.toISOString().split('T')[0];
 
+    // Total expiring (includes expired + expiring soon) — used for summary line
     const { count: expCount } = await supabase
       .from('medicines')
       .select('*', { count: 'exact', head: true })
       .in('medkit_id', medkitIds)
       .eq('is_archived', false)
       .not('expiry_date', 'is', null)
-      .lte('expiry_date', thresholdDate.toISOString().split('T')[0]);
+      .lte('expiry_date', thresholdDateStr);
     expiringCount = expCount || 0;
+
+    // Expired (expiry_date <= today) — for attention banner
+    const { count: expiredC } = await supabase
+      .from('medicines')
+      .select('*', { count: 'exact', head: true })
+      .in('medkit_id', medkitIds)
+      .eq('is_archived', false)
+      .not('expiry_date', 'is', null)
+      .lte('expiry_date', todayStr);
+    expiredCount = expiredC || 0;
+
+    // Expiring soon (today < expiry_date <= threshold) — for attention banner
+    const { count: soonCount } = await supabase
+      .from('medicines')
+      .select('*', { count: 'exact', head: true })
+      .in('medkit_id', medkitIds)
+      .eq('is_archived', false)
+      .not('expiry_date', 'is', null)
+      .gt('expiry_date', todayStr)
+      .lte('expiry_date', thresholdDateStr);
+    expiringSoonCount = soonCount || 0;
 
     const { count: lowCount } = await supabase
       .from('medicines')
@@ -47,13 +72,26 @@ async function buildDashboard(userId, settings, t) {
   const doneIntakes = intakeLogs.filter(l => l.status === 'taken').length;
 
   let text = t('menu.title');
-  text += t('menu.medkits_count', { count: medkitCount }) + '\n';
-  if (totalIntakes > 0) {
-    text += t('menu.intake_today', { taken: doneIntakes, total: totalIntakes }) + '\n';
+
+  // Empty state when user has no medkits
+  if (medkitCount === 0) {
+    text += t('menu.empty_medkits') + '\n';
+  } else {
+    text += t('menu.medkits_count', { count: medkitCount }) + '\n';
+    if (totalIntakes > 0) {
+      text += t('menu.intake_today', { taken: doneIntakes, total: totalIntakes }) + '\n';
+    }
+    if (expiringCount > 0) text += t('menu.expiring_soon', { count: expiringCount }) + '\n';
+    if (lowStockCount > 0) text += t('menu.low_stock', { count: lowStockCount }) + '\n';
+    if (shopCount > 0) text += t('menu.shopping_count', { count: shopCount }) + '\n';
+
+    // Attention banner for expired / expiring-soon medicines
+    if (expiredCount > 0 || expiringSoonCount > 0) {
+      text += '\n' + t('menu.attention') + '\n';
+      if (expiredCount > 0) text += t('menu.attention_expired', { count: expiredCount }) + '\n';
+      if (expiringSoonCount > 0) text += t('menu.attention_expiring', { count: expiringSoonCount }) + '\n';
+    }
   }
-  if (expiringCount > 0) text += t('menu.expiring_soon', { count: expiringCount }) + '\n';
-  if (lowStockCount > 0) text += t('menu.low_stock', { count: lowStockCount }) + '\n';
-  if (shopCount > 0) text += t('menu.shopping_count', { count: shopCount }) + '\n';
 
   return text;
 }

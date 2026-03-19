@@ -264,6 +264,7 @@ export default {
     // Cancel
     cancel_toast: 'Отменено',
     cancel_confirm: '❌ Данные будут потеряны. Отменить?',
+    btn_cancel_no: 'Нет, продолжить',
     cancel_done: '❌ Добавление отменено.',
     // Success
     success: '✅ Лекарство *«{name}»* добавлено!',

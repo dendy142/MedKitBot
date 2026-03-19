@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import { CATEGORIES, DOSAGE_UNITS, QUANTITY_UNITS, MAX_PHOTOS } from '../config.js';
+import { CATEGORIES, CATEGORY_KEYWORDS, DOSAGE_UNITS, QUANTITY_UNITS, MAX_PHOTOS } from '../config.js';
 import { createMedicine } from '../db/queries/medicines.js';
 import { getMedkit } from '../db/queries/medkits.js';
 import { formatDate, formatQuantity } from '../utils/format.js';
@@ -52,6 +52,17 @@ async function deleteUserMsg(ctx) {
   try {
     await ctx.deleteMessage();
   } catch { /* ignore — might not have permission */ }
+}
+
+/**
+ * Auto-detect category from medicine name using CATEGORY_KEYWORDS
+ */
+function detectCategory(name) {
+  const lower = name.toLowerCase();
+  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (keywords.some(kw => lower.includes(kw))) return category;
+  }
+  return null;
 }
 
 // ============================================================
@@ -114,6 +125,12 @@ export async function handleAddMedicineText(ctx) {
 
   if (step === 'name') {
     state.data.name = text;
+    // #33 Auto-category detection from name
+    const autoCategory = detectCategory(text);
+    if (autoCategory) {
+      state.data.category = autoCategory;
+      state.autoCategory = true;
+    }
     state.step = 'dosage_unit';
     await setState(ctx.dbUser.id, state);
     await sendDosageUnitPicker(ctx, state);
@@ -122,22 +139,41 @@ export async function handleAddMedicineText(ctx) {
 
   if (step === 'dosage_value') {
     state.data.dosage = `${text} ${state.dosageUnit}`;
-    state.step = 'category';
-    await setState(ctx.dbUser.id, state);
-    await sendCategoryPicker(ctx, state);
+    // #33 Skip category step if auto-detected
+    if (state.autoCategory) {
+      state.step = 'tags';
+      await setState(ctx.dbUser.id, state);
+      await sendTagsPrompt(ctx, state, true);
+    } else {
+      state.step = 'category';
+      await setState(ctx.dbUser.id, state);
+      await sendCategoryPicker(ctx, state);
+    }
     return true;
   }
 
   if (step === 'dosage_custom') {
     state.data.dosage = text;
-    state.step = 'category';
-    await setState(ctx.dbUser.id, state);
-    await sendCategoryPicker(ctx, state);
+    // #33 Skip category step if auto-detected
+    if (state.autoCategory) {
+      state.step = 'tags';
+      await setState(ctx.dbUser.id, state);
+      await sendTagsPrompt(ctx, state, true);
+    } else {
+      state.step = 'category';
+      await setState(ctx.dbUser.id, state);
+      await sendCategoryPicker(ctx, state);
+    }
     return true;
   }
 
   if (step === 'category_custom') {
     state.data.category = text;
+    // #15 Remember last category
+    await supabase.from('sessions').upsert(
+      { key: `lastCategory:${ctx.dbUser.id}`, value: text, updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
     state.step = 'tags';
     await setState(ctx.dbUser.id, state);
     await sendTagsPrompt(ctx, state);
@@ -226,6 +262,22 @@ export async function handleAddMedicineCallback(ctx, action) {
   }
 
   if (action === 'addmed:cancel') {
+    // #13 If data has been entered (name filled), show confirmation first
+    if (state.data.name && !state.cancelConfirmed) {
+      state.cancelConfirmed = false;
+      await setState(ctx.dbUser.id, state);
+      await ctx.answerCallbackQuery();
+      await ctx.editMessageText(
+        ctx.t('addmed.cancel_confirm'),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text(ctx.t('common.yes'), 'addmed:cancel_yes')
+            .text(ctx.t('addmed.btn_cancel_no'), 'addmed:cancel_no'),
+        }
+      );
+      return true;
+    }
     const fromOnboarding = state.fromOnboarding;
     const medkitId = state.medkitId;
     await clearState(ctx.dbUser.id);
@@ -248,6 +300,41 @@ export async function handleAddMedicineCallback(ctx, action) {
         reply_markup: new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${medkitId}`),
       });
     }
+    return true;
+  }
+
+  // #13 Cancel confirmation — yes
+  if (action === 'addmed:cancel_yes') {
+    const fromOnboarding = state.fromOnboarding;
+    const medkitId = state.medkitId;
+    await clearState(ctx.dbUser.id);
+    await ctx.answerCallbackQuery(ctx.t('common.cancelled'));
+    if (fromOnboarding) {
+      await ctx.editMessageText(
+        ctx.t('addmed.skip_onboarding'),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text(ctx.t('common.to_medkits'), 'medkits')
+            .text(ctx.t('common.to_settings'), 'settings')
+            .row()
+            .text(ctx.t('common.to_help'), 'help')
+            .text(ctx.t('common.main_menu'), 'main_menu'),
+        }
+      );
+    } else {
+      await ctx.editMessageText(ctx.t('addmed.cancel_done'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${medkitId}`),
+      });
+    }
+    return true;
+  }
+
+  // #13 Cancel confirmation — no, continue wizard
+  if (action === 'addmed:cancel_no') {
+    await ctx.answerCallbackQuery();
+    // Re-show the current step
+    await resendCurrentStep(ctx, state);
     return true;
   }
 
@@ -291,8 +378,14 @@ export async function handleAddMedicineCallback(ctx, action) {
 
   // --- Category ---
   if (action.startsWith('addmed:cat:')) {
-    state.data.category = action.replace('addmed:cat:', '');
+    const category = action.replace('addmed:cat:', '');
+    state.data.category = category;
     await ctx.answerCallbackQuery();
+    // #15 Remember last category
+    await supabase.from('sessions').upsert(
+      { key: `lastCategory:${ctx.dbUser.id}`, value: category, updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
     state.step = 'tags';
     await setState(ctx.dbUser.id, state);
     await ctx.editMessageText(
@@ -430,6 +523,13 @@ export async function handleAddMedicineCallback(ctx, action) {
   // --- Confirm / Reject ---
   if (action === 'addmed:confirm') {
     await ctx.answerCallbackQuery();
+    // #15 Remember last category on save (covers auto-category case too)
+    if (state.data.category) {
+      await supabase.from('sessions').upsert(
+        { key: `lastCategory:${ctx.dbUser.id}`, value: state.data.category, updated_at: new Date().toISOString() },
+        { onConflict: 'key' }
+      );
+    }
     const medicine = await createMedicine(state.data);
     await logAction(ctx.dbUser.id, 'create', 'medicine', medicine.id, { name: state.data.name });
     const fromOnboarding = state.fromOnboarding;
@@ -501,9 +601,16 @@ async function advanceStep(ctx, state) {
   const { step } = state;
 
   if (step === 'dosage_unit' || step === 'dosage_value' || step === 'dosage_custom') {
-    state.step = 'category';
-    await setState(ctx.dbUser.id, state);
-    await sendCategoryPicker(ctx, state);
+    // #33 Skip category step if auto-detected
+    if (state.autoCategory) {
+      state.step = 'tags';
+      await setState(ctx.dbUser.id, state);
+      await sendTagsPrompt(ctx, state, true);
+    } else {
+      state.step = 'category';
+      await setState(ctx.dbUser.id, state);
+      await sendCategoryPicker(ctx, state);
+    }
   } else if (step === 'category' || step === 'category_custom') {
     state.step = 'tags';
     await setState(ctx.dbUser.id, state);
@@ -532,6 +639,60 @@ async function advanceStep(ctx, state) {
   return true;
 }
 
+/**
+ * #13 Re-show the current wizard step after cancel was declined
+ */
+async function resendCurrentStep(ctx, state) {
+  const { step } = state;
+  const cancelKb = new InlineKeyboard()
+    .text(ctx.t('common.skip'), 'addmed:skip').row()
+    .text(ctx.t('common.cancel'), 'addmed:cancel');
+
+  if (step === 'name') {
+    await ctx.editMessageText(
+      ctx.t('addmed.step1', { medkit: state.medkitName }),
+      { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'addmed:cancel') }
+    );
+  } else if (step === 'dosage_unit') {
+    await sendDosageUnitPicker(ctx, state);
+  } else if (step === 'dosage_value') {
+    await ctx.editMessageText(
+      ctx.t('addmed.step2_value', { unit: state.dosageUnit }),
+      { parse_mode: 'Markdown', reply_markup: cancelKb }
+    );
+  } else if (step === 'dosage_custom') {
+    await ctx.editMessageText(
+      ctx.t('addmed.step2_custom'),
+      { parse_mode: 'Markdown', reply_markup: cancelKb }
+    );
+  } else if (step === 'category') {
+    await sendCategoryPicker(ctx, state);
+  } else if (step === 'category_custom') {
+    await ctx.editMessageText(
+      ctx.t('addmed.step3_custom'),
+      { parse_mode: 'Markdown', reply_markup: cancelKb }
+    );
+  } else if (step === 'tags') {
+    await sendTagsPrompt(ctx, state);
+  } else if (step === 'expiry_year') {
+    await sendExpiryYearPicker(ctx, state);
+  } else if (step === 'expiry_month') {
+    await sendExpiryMonthPicker(ctx, state.expiryYear);
+  } else if (step === 'expiry_day') {
+    await sendExpiryDayPicker(ctx, state.expiryYear, state.expiryMonth);
+  } else if (step === 'quantity') {
+    await sendQuantityPrompt(ctx, state);
+  } else if (step === 'quantity_unit') {
+    await sendQuantityUnitPicker(ctx, state);
+  } else if (step === 'photos') {
+    await sendPhotosPrompt(ctx, state);
+  } else if (step === 'notes') {
+    await sendNotesPrompt(ctx, state);
+  } else if (step === 'confirm') {
+    await sendConfirmation(ctx, state);
+  }
+}
+
 // ============================================================
 // PROMPT SENDERS — all edit the single bot message
 // ============================================================
@@ -550,10 +711,31 @@ async function sendDosageUnitPicker(ctx, state) {
 }
 
 async function sendCategoryPicker(ctx, state) {
+  // #15 Fetch last used category and reorder list
+  const { data: lastCatData } = await supabase
+    .from('sessions')
+    .select('value')
+    .eq('key', `lastCategory:${ctx.dbUser.id}`)
+    .single();
+  const lastCat = lastCatData?.value;
+
+  let categories = [...CATEGORIES];
+  if (lastCat && categories.includes(lastCat)) {
+    categories = [lastCat, ...categories.filter(c => c !== lastCat)];
+  }
+
   const keyboard = new InlineKeyboard();
-  for (let i = 0; i < CATEGORIES.length; i += 2) {
-    keyboard.text(CATEGORIES[i], `addmed:cat:${CATEGORIES[i]}`);
-    if (CATEGORIES[i + 1]) keyboard.text(CATEGORIES[i + 1], `addmed:cat:${CATEGORIES[i + 1]}`);
+  for (let i = 0; i < categories.length; i += 2) {
+    const label1 = (categories[i] === lastCat)
+      ? `${categories[i]} ${ctx.t('addmed.last_category')}`
+      : categories[i];
+    keyboard.text(label1, `addmed:cat:${categories[i]}`);
+    if (categories[i + 1]) {
+      const label2 = (categories[i + 1] === lastCat)
+        ? `${categories[i + 1]} ${ctx.t('addmed.last_category')}`
+        : categories[i + 1];
+      keyboard.text(label2, `addmed:cat:${categories[i + 1]}`);
+    }
     keyboard.row();
   }
   keyboard.text(ctx.t('addmed.btn_custom_category'), 'addmed:cat_custom').row();
@@ -562,11 +744,16 @@ async function sendCategoryPicker(ctx, state) {
   await editBotMsg(ctx, state, ctx.t('addmed.step3_category'), keyboard);
 }
 
-async function sendTagsPrompt(ctx, state) {
+async function sendTagsPrompt(ctx, state, showAutoCategory = false) {
+  let text = '';
+  if (showAutoCategory && state.autoCategory && state.data.category) {
+    text += ctx.t('addmed.auto_category', { category: state.data.category }) + '\n\n';
+  }
+  text += ctx.t('addmed.step4_tags');
   const kb = new InlineKeyboard()
     .text(ctx.t('common.skip'), 'addmed:skip').row()
     .text(ctx.t('common.cancel'), 'addmed:cancel');
-  await editBotMsg(ctx, state, ctx.t('addmed.step4_tags'), kb);
+  await editBotMsg(ctx, state, text, kb);
 }
 
 async function sendExpiryYearPicker(ctx, state) {

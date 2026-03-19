@@ -642,11 +642,82 @@ export function registerScheduleHandlers(bot) {
     );
   });
 
+  // #29 Schedule conflict — user confirmed creation despite conflict
+  bot.callbackQuery('sched:conflict:yes', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const state = await getWizardState(ctx.dbUser.id);
+    if (!state || state.action !== 'create_schedule') return;
+
+    // Force-create (skip conflict check)
+    try {
+      await createSchedule({
+        medicineId: state.medId,
+        userId: ctx.dbUser.id,
+        timeMode: state.timeMode,
+        timeValue: state.timeValue,
+        dosePerIntake: state.dosePerIntake,
+        frequency: state.frequency,
+        frequencyDays: state.frequencyDays || [],
+        durationType: state.durationType,
+        durationValue: state.durationType === 'until_date' ? state.durationValue : (state.durationValue || null),
+        startDate: new Date().toISOString().split('T')[0],
+      });
+
+      await clearWizardState(ctx.dbUser.id);
+
+      await ctx.editMessageText(
+        ctx.t('schedule.created_toast'),
+        {
+          reply_markup: new InlineKeyboard()
+            .text(ctx.t('schedule.btn_to_schedules'), `med:${state.medId}:schedule`)
+            .text(ctx.t('schedule.btn_to_medicine'), `med:${state.medId}`),
+        }
+      );
+    } catch (e) {
+      console.error('Error creating schedule (conflict override):', e);
+      await ctx.editMessageText(
+        ctx.t('schedule.create_error'),
+        {
+          reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:schedule`),
+        }
+      );
+    }
+  });
+
   // Confirm creation
   bot.callbackQuery('sched:confirm:yes', async (ctx) => {
     await ctx.answerCallbackQuery();
     const state = await getWizardState(ctx.dbUser.id);
     if (!state || state.action !== 'create_schedule') return;
+
+    // #29 Check for schedule conflicts before creating
+    try {
+      const { data: conflicts } = await supabase
+        .from('schedules')
+        .select('id')
+        .eq('medicine_id', state.medId)
+        .eq('time_value', state.timeValue)
+        .eq('status', 'active');
+
+      if (conflicts && conflicts.length > 0) {
+        const med = await getMedicine(state.medId);
+        const name = med?.name || '?';
+        const time = state.timeMode === 'exact' ? state.timeValue : getPeriodLabel(ctx, state.timeValue);
+
+        await ctx.editMessageText(
+          ctx.t('schedule.conflict', { name, time }),
+          {
+            reply_markup: new InlineKeyboard()
+              .text(ctx.t('schedule.btn_conflict_yes'), 'sched:conflict:yes')
+              .text(ctx.t('common.cancel'), `med:${state.medId}:schedule`),
+          }
+        );
+        return;
+      }
+    } catch (e) {
+      console.error('Error checking schedule conflicts:', e);
+      // Proceed with creation if conflict check fails
+    }
 
     try {
       await createSchedule({

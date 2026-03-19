@@ -1,7 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { CATEGORIES, CATEGORY_KEYWORDS, DOSAGE_UNITS, QUANTITY_UNITS, MAX_PHOTOS } from '../config.js';
 import { createMedicine } from '../db/queries/medicines.js';
-import { getMedkit } from '../db/queries/medkits.js';
+import { getMedkit, getUserMedkits } from '../db/queries/medkits.js';
 import { formatDate, formatQuantity } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
 import { supabase } from '../db/supabase.js';
@@ -97,11 +97,14 @@ export async function startAddMedicine(ctx, medkitId, options = {}) {
   };
 
   // Edit the current message (from callback) — this becomes our single bot message
+  const startKb = new InlineKeyboard()
+    .text(ctx.t('addmed.btn_from_templates'), `addmed:templates:${medkitId}`).row()
+    .text(ctx.t('common.cancel'), 'addmed:cancel');
   await ctx.editMessageText(
     ctx.t('addmed.step1', { medkit: medkit.name }),
     {
       parse_mode: 'Markdown',
-      reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'addmed:cancel'),
+      reply_markup: startKb,
     }
   );
   // Store the message ID so we can edit it later from text handlers
@@ -131,6 +134,61 @@ export async function handleAddMedicineText(ctx) {
       state.data.category = autoCategory;
       state.autoCategory = true;
     }
+
+    // #30 Duplicate medicine check
+    if (!state.duplicateConfirmed) {
+      const { data: duplicates } = await supabase
+        .from('medicines')
+        .select('id, name, dosage')
+        .eq('medkit_id', state.medkitId)
+        .eq('is_archived', false)
+        .ilike('name', text.trim());
+
+      if (duplicates && duplicates.length > 0) {
+        state.step = 'name_duplicate';
+        state.duplicateId = duplicates[0].id;
+        await setState(ctx.dbUser.id, state);
+        await editBotMsg(ctx, state,
+          ctx.t('medicine.duplicate_found', { name: text }),
+          new InlineKeyboard()
+            .text(ctx.t('medicine.btn_add_anyway'), 'addmed:dup_add')
+            .text(ctx.t('medicine.btn_go_existing'), `addmed:dup_go:${duplicates[0].id}`)
+        );
+        return true;
+      }
+    }
+
+    // #31 Dosage hint from history — search for similar medicines across all user's medkits
+    try {
+      const userMedkits = await getUserMedkits(ctx.dbUser.id);
+      const medkitIds = userMedkits.map(m => m.id);
+      if (medkitIds.length > 0) {
+        const { data: similar } = await supabase
+          .from('medicines')
+          .select('name, dosage, category, quantity_unit')
+          .in('medkit_id', medkitIds)
+          .ilike('name', `%${text.trim().split(' ')[0]}%`)
+          .limit(1);
+        if (similar && similar.length > 0) {
+          const match = similar[0];
+          state.hintMatch = match;
+          state.step = 'hint_confirm';
+          await setState(ctx.dbUser.id, state);
+          const hintKb = new InlineKeyboard()
+            .text(ctx.t('addmed.btn_use_hint'), 'addmed:hint_yes')
+            .text(ctx.t('addmed.btn_enter_manual'), 'addmed:hint_no');
+          await editBotMsg(ctx, state,
+            ctx.t('addmed.hint_from_history', {
+              name: `${match.name}${match.dosage ? ' ' + match.dosage : ''}`,
+              category: match.category || '—',
+            }),
+            hintKb
+          );
+          return true;
+        }
+      }
+    } catch { /* ignore hint errors, proceed normally */ }
+
     state.step = 'dosage_unit';
     await setState(ctx.dbUser.id, state);
     await sendDosageUnitPicker(ctx, state);
@@ -253,6 +311,26 @@ export async function handleAddMedicinePhoto(ctx) {
 // ============================================================
 
 export async function handleAddMedicineCallback(ctx, action) {
+  // #39 Suggest schedule dismiss — handled after state is cleared
+  if (action.startsWith('addmed:sched_dismiss:')) {
+    const parts = action.replace('addmed:sched_dismiss:', '').split(':');
+    const medId = parts[0];
+    const medkitId = parts[1];
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(
+      ctx.t('addmed.success', { name: '—' }),
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text(ctx.t('addmed.btn_open'), `med:${medId}`)
+          .text(ctx.t('common.add_more'), `medkit:${medkitId}:add`)
+          .row()
+          .text(ctx.t('medkit.btn_to_medkit'), `medkit:${medkitId}`),
+      }
+    );
+    return true;
+  }
+
   const state = await getState(ctx.dbUser.id);
   if (!state) return false;
 
@@ -341,6 +419,187 @@ export async function handleAddMedicineCallback(ctx, action) {
   if (action === 'addmed:skip') {
     await ctx.answerCallbackQuery();
     return await advanceStep(ctx, state);
+  }
+
+  // #30 Duplicate — user wants to add anyway
+  if (action === 'addmed:dup_add') {
+    await ctx.answerCallbackQuery();
+    state.duplicateConfirmed = true;
+    state.step = 'dosage_unit';
+    delete state.duplicateId;
+    await setState(ctx.dbUser.id, state);
+    await sendDosageUnitPicker(ctx, state);
+    return true;
+  }
+
+  // #30 Duplicate — go to existing medicine
+  if (action.startsWith('addmed:dup_go:')) {
+    const existingId = action.replace('addmed:dup_go:', '');
+    await clearState(ctx.dbUser.id);
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(`💊 ${ctx.t('common.loading')}`, {
+      parse_mode: 'Markdown',
+      reply_markup: new InlineKeyboard().text(ctx.t('medicine.btn_to_medicine'), `med:${existingId}`),
+    });
+    return true;
+  }
+
+  // #31 Hint from history — user accepts suggestion
+  if (action === 'addmed:hint_yes') {
+    await ctx.answerCallbackQuery();
+    const match = state.hintMatch;
+    if (match) {
+      if (match.dosage) state.data.dosage = match.dosage;
+      if (match.category) {
+        state.data.category = match.category;
+        state.autoCategory = true;
+      }
+      if (match.quantity_unit) state.data.quantityUnit = match.quantity_unit;
+    }
+    // Skip dosage, category steps — go to tags
+    state.step = 'tags';
+    delete state.hintMatch;
+    await setState(ctx.dbUser.id, state);
+    await sendTagsPrompt(ctx, state, !!state.autoCategory);
+    return true;
+  }
+
+  // #31 Hint from history — user declines, proceed manually
+  if (action === 'addmed:hint_no') {
+    await ctx.answerCallbackQuery();
+    delete state.hintMatch;
+    state.step = 'dosage_unit';
+    await setState(ctx.dbUser.id, state);
+    await sendDosageUnitPicker(ctx, state);
+    return true;
+  }
+
+  // #32 Templates — show list of user's existing medicines
+  if (action.startsWith('addmed:templates:')) {
+    await ctx.answerCallbackQuery();
+    try {
+      const userMedkits = await getUserMedkits(ctx.dbUser.id);
+      const medkitIds = userMedkits.map(m => m.id);
+      if (medkitIds.length > 0) {
+        const { data: templates } = await supabase
+          .from('medicines')
+          .select('name, dosage, category, quantity_unit, tags, notes')
+          .in('medkit_id', medkitIds)
+          .eq('is_archived', false)
+          .order('name');
+        const unique = [...new Map((templates || []).map(m => [m.name.toLowerCase(), m])).values()];
+        if (unique.length > 0) {
+          state.templates = unique;
+          state.step = 'template_pick';
+          await setState(ctx.dbUser.id, state);
+          const kb = new InlineKeyboard();
+          unique.forEach((m, i) => {
+            const label = m.dosage ? `${m.name} (${m.dosage})` : m.name;
+            kb.text(label, `addmed:tpl:${i}`).row();
+          });
+          kb.text(ctx.t('common.cancel'), 'addmed:cancel');
+          await ctx.editMessageText(
+            ctx.t('addmed.templates_title'),
+            { parse_mode: 'Markdown', reply_markup: kb }
+          );
+        } else {
+          await ctx.editMessageText(
+            ctx.t('addmed.templates_empty'),
+            {
+              parse_mode: 'Markdown',
+              reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `addmed:back_to_name`),
+            }
+          );
+        }
+      }
+    } catch {
+      // Fallback — go back to name step
+      await resendCurrentStep(ctx, state);
+    }
+    return true;
+  }
+
+  // #32 Templates — user picks a template
+  if (action.startsWith('addmed:tpl:')) {
+    const idx = parseInt(action.replace('addmed:tpl:', ''));
+    await ctx.answerCallbackQuery();
+    const tpl = state.templates?.[idx];
+    if (tpl) {
+      state.data.name = tpl.name;
+      if (tpl.dosage) state.data.dosage = tpl.dosage;
+      if (tpl.category) {
+        state.data.category = tpl.category;
+        state.autoCategory = true;
+      }
+      if (tpl.quantity_unit) state.data.quantityUnit = tpl.quantity_unit;
+      if (tpl.tags) state.data.tags = tpl.tags;
+      if (tpl.notes) state.data.notes = tpl.notes;
+      delete state.templates;
+      // Skip to quantity step
+      state.step = 'quantity';
+      await setState(ctx.dbUser.id, state);
+      await sendQuantityPrompt(ctx, state);
+    }
+    return true;
+  }
+
+  // #32 Back to name step from templates empty
+  if (action === 'addmed:back_to_name') {
+    await ctx.answerCallbackQuery();
+    state.step = 'name';
+    await setState(ctx.dbUser.id, state);
+    await resendCurrentStep(ctx, state);
+    return true;
+  }
+
+  // #34 Past expiry date warning — user confirms
+  if (action === 'addmed:expiry_past_ok') {
+    await ctx.answerCallbackQuery();
+    state.expiryWarningShown = true;
+    state.step = 'quantity';
+    await setState(ctx.dbUser.id, state);
+    await ctx.editMessageText(
+      ctx.t('addmed.step6_quantity'),
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text(ctx.t('common.skip'), 'addmed:skip').row()
+          .text(ctx.t('common.cancel'), 'addmed:cancel'),
+      }
+    );
+    return true;
+  }
+
+  // #34 Past expiry date warning — user wants to re-enter
+  if (action === 'addmed:expiry_past_reenter') {
+    await ctx.answerCallbackQuery();
+    state.step = 'expiry_year';
+    delete state.expiryYear;
+    delete state.expiryMonth;
+    state.data.expiryDate = null;
+    await setState(ctx.dbUser.id, state);
+    await sendExpiryYearPicker(ctx, state);
+    return true;
+  }
+
+  // #39 Suggest schedule — user declines (state already cleared at this point)
+  if (action.startsWith('addmed:sched_dismiss:')) {
+    const parts = action.replace('addmed:sched_dismiss:', '').split(':');
+    const medId = parts[0];
+    const medkitId = parts[1];
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(
+      ctx.t('addmed.success', { name: '—' }),
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text(ctx.t('addmed.btn_open'), `med:${medId}`)
+          .text(ctx.t('common.add_more'), `medkit:${medkitId}:add`)
+          .row()
+          .text(ctx.t('medkit.btn_to_medkit'), `medkit:${medkitId}`),
+      }
+    );
+    return true;
   }
 
   // --- Dosage unit ---
@@ -446,6 +705,24 @@ export async function handleAddMedicineCallback(ctx, action) {
     const m = String(state.expiryMonth).padStart(2, '0');
     const d = String(day).padStart(2, '0');
     state.data.expiryDate = `${y}-${m}-${d}`;
+
+    // #34 Past expiry date warning
+    const parsed = new Date(`${y}-${m}-${d}`);
+    if (parsed < new Date() && !state.expiryWarningShown) {
+      state.step = 'expiry_past_confirm';
+      await setState(ctx.dbUser.id, state);
+      await ctx.editMessageText(
+        ctx.t('medicine.expiry_in_past'),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text(ctx.t('medicine.btn_continue'), 'addmed:expiry_past_ok')
+            .text(ctx.t('medicine.btn_enter_another'), 'addmed:expiry_past_reenter'),
+        }
+      );
+      return true;
+    }
+
     state.step = 'quantity';
     await setState(ctx.dbUser.id, state);
     await ctx.editMessageText(
@@ -466,6 +743,24 @@ export async function handleAddMedicineCallback(ctx, action) {
     const m = String(state.expiryMonth).padStart(2, '0');
     const lastDay = new Date(y, state.expiryMonth, 0).getDate();
     state.data.expiryDate = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+
+    // #34 Past expiry date warning
+    const parsed = new Date(y, state.expiryMonth - 1, lastDay);
+    if (parsed < new Date() && !state.expiryWarningShown) {
+      state.step = 'expiry_past_confirm';
+      await setState(ctx.dbUser.id, state);
+      await ctx.editMessageText(
+        ctx.t('medicine.expiry_in_past'),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text(ctx.t('medicine.btn_continue'), 'addmed:expiry_past_ok')
+            .text(ctx.t('medicine.btn_enter_another'), 'addmed:expiry_past_reenter'),
+        }
+      );
+      return true;
+    }
+
     state.step = 'quantity';
     await setState(ctx.dbUser.id, state);
     await ctx.editMessageText(
@@ -550,11 +845,15 @@ export async function handleAddMedicineCallback(ctx, action) {
         }
       );
     } else {
+      // #39 Suggest schedule after adding medicine
       await ctx.editMessageText(
-        ctx.t('addmed.success', { name: state.data.name }),
+        ctx.t('addmed.success', { name: state.data.name }) + '\n\n' + ctx.t('medicine.suggest_schedule'),
         {
           parse_mode: 'Markdown',
           reply_markup: new InlineKeyboard()
+            .text(ctx.t('medicine.btn_yes_schedule'), `sched:create:${medicine.id}`)
+            .text(ctx.t('medicine.btn_no_schedule'), `addmed:sched_dismiss:${medicine.id}:${medkitId}`)
+            .row()
             .text(ctx.t('addmed.btn_open'), `med:${medicine.id}`)
             .text(ctx.t('common.add_more'), `medkit:${medkitId}:add`)
             .row()
@@ -648,10 +947,52 @@ async function resendCurrentStep(ctx, state) {
     .text(ctx.t('common.skip'), 'addmed:skip').row()
     .text(ctx.t('common.cancel'), 'addmed:cancel');
 
-  if (step === 'name') {
+  if (step === 'name' || step === 'name_duplicate') {
+    const nameKb = new InlineKeyboard()
+      .text(ctx.t('addmed.btn_from_templates'), `addmed:templates:${state.medkitId}`).row()
+      .text(ctx.t('common.cancel'), 'addmed:cancel');
     await ctx.editMessageText(
       ctx.t('addmed.step1', { medkit: state.medkitName }),
-      { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'addmed:cancel') }
+      { parse_mode: 'Markdown', reply_markup: nameKb }
+    );
+  } else if (step === 'hint_confirm') {
+    // Re-show hint from history
+    const match = state.hintMatch;
+    if (match) {
+      const hintKb = new InlineKeyboard()
+        .text(ctx.t('addmed.btn_use_hint'), 'addmed:hint_yes')
+        .text(ctx.t('addmed.btn_enter_manual'), 'addmed:hint_no');
+      await ctx.editMessageText(
+        ctx.t('addmed.hint_from_history', {
+          name: `${match.name}${match.dosage ? ' ' + match.dosage : ''}`,
+          category: match.category || '—',
+        }),
+        { parse_mode: 'Markdown', reply_markup: hintKb }
+      );
+    } else {
+      // Fallback to dosage step
+      await sendDosageUnitPicker(ctx, state);
+    }
+  } else if (step === 'template_pick') {
+    // Re-trigger templates listing
+    state.step = 'name';
+    await setState(ctx.dbUser.id, state);
+    const nameKb = new InlineKeyboard()
+      .text(ctx.t('addmed.btn_from_templates'), `addmed:templates:${state.medkitId}`).row()
+      .text(ctx.t('common.cancel'), 'addmed:cancel');
+    await ctx.editMessageText(
+      ctx.t('addmed.step1', { medkit: state.medkitName }),
+      { parse_mode: 'Markdown', reply_markup: nameKb }
+    );
+  } else if (step === 'expiry_past_confirm') {
+    await ctx.editMessageText(
+      ctx.t('medicine.expiry_in_past'),
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text(ctx.t('medicine.btn_continue'), 'addmed:expiry_past_ok')
+          .text(ctx.t('medicine.btn_enter_another'), 'addmed:expiry_past_reenter'),
+      }
     );
   } else if (step === 'dosage_unit') {
     await sendDosageUnitPicker(ctx, state);

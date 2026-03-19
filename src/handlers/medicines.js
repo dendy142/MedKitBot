@@ -72,6 +72,58 @@ async function showMedicineCard(ctx, medicineId) {
     }
   }
 
+  // #38 Per-medicine stats (if medicine has active schedules)
+  if (schedules && schedules.length > 0) {
+    const { data: medLogs } = await supabase
+      .from('intake_logs')
+      .select('status, planned_at')
+      .eq('medicine_id', medicineId)
+      .order('planned_at', { ascending: false });
+
+    if (medLogs && medLogs.length > 0) {
+      const taken = medLogs.filter(l => l.status === 'taken').length;
+      const pct = Math.round(taken / medLogs.length * 100);
+      const timezone = ctx.dbUser.timezone || 'Etc/GMT-3';
+
+      // Calculate current streak for this medicine
+      const byDate = {};
+      for (const log of medLogs) {
+        const d = new Date(log.planned_at);
+        const dateStr = d.toLocaleDateString('en-CA', { timeZone: timezone });
+        if (!byDate[dateStr]) byDate[dateStr] = [];
+        byDate[dateStr].push(log);
+      }
+      const dates = Object.keys(byDate).sort().reverse();
+
+      // Current streak: consecutive all-taken days from most recent backwards
+      let currentStreak = 0;
+      let currentStreakDone = false;
+      // Best streak: longest run of all-taken days
+      let bestStreak = 0;
+      let runStreak = 0;
+
+      for (const dateStr of dates) {
+        const dayLogs = byDate[dateStr];
+        const allTaken = dayLogs.every(l => l.status === 'taken');
+        const hasPending = dayLogs.some(l => l.status === 'pending');
+
+        if (allTaken && !hasPending) {
+          runStreak++;
+          if (!currentStreakDone) currentStreak++;
+          if (runStreak > bestStreak) bestStreak = runStreak;
+        } else if (hasPending && !currentStreakDone) {
+          // Skip today if still pending — don't break current streak
+          continue;
+        } else {
+          if (!currentStreakDone) currentStreakDone = true;
+          runStreak = 0;
+        }
+      }
+
+      text += `\n${ctx.t('stats.med_stats', { taken, planned: medLogs.length, pct, streak: currentStreak, best: bestStreak })}\n`;
+    }
+  }
+
   // #25 Date added
   text += `\n${ctx.t('medicine.label_added', { date: formatDate(med.created_at, dateFormat) })}`;
 

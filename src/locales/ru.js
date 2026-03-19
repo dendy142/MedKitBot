@@ -274,10 +274,14 @@ export default {
     invalid_name: 'Введите название лекарства (до 100 символов)',
     // Auto-category (#33)
     auto_category: 'Подсказка: категория «{category}» подобрана автоматически.',
-    // Template (#32)
-    template_found: 'Вы раньше добавляли «{name}» ({category}). Использовать те же параметры?',
-    btn_use_template: 'Да, использовать',
-    btn_enter_manual: 'Нет, ввести вручную',
+    // Hint from history (#31)
+    hint_from_history: 'Вы раньше добавляли «{name}» ({category}). Использовать те же параметры?',
+    btn_use_hint: 'Да, использовать',
+    btn_enter_manual: 'Нет, вручную',
+    // Templates (#32)
+    btn_from_templates: '📋 Из моих лекарств',
+    templates_title: '📋 *Выберите лекарство:*\n\nОно будет добавлено с предыдущими параметрами.',
+    templates_empty: 'У вас пока нет добавленных лекарств.',
     // Last category (#15)
     last_category: '(последняя)',
     // Onboarding skip
@@ -415,12 +419,14 @@ export default {
     error_generic: 'Ошибка',
     // Conflict check (#29)
     conflict: '⚠️ У вас уже есть приём «{name}» в {time}. Создать ещё одно?',
+    btn_conflict_yes: 'Да, создать',
     // Auto-pause (#40)
-    auto_pause: '💊 {name} закончился. Расписание поставлено на паузу.',
+    auto_pause: '⏸ {name} закончился — расписание ({count}) поставлено на паузу.',
     // Resume suggestion (#41)
-    resume_suggest: 'Вы пополнили {name}. Возобновить расписание?',
+    resume_suggest: '▶️ Вы пополнили {name}. Возобновить расписание ({count})?',
     btn_resume_yes: '▶️ Возобновить',
     btn_resume_no: 'Нет',
+    btn_resume_all: '▶️ Возобновить все',
   },
 
   // ── Shopping list ────────────────────────────────────────────────
@@ -550,9 +556,33 @@ export default {
     sort_toast: 'Сортировка: {value}',
     date_toast: 'Формат: {value}',
     // Quiet hours (#42)
-    quiet_title: '🔇 *Тихие часы*',
-    quiet_from: 'С: {time}',
-    quiet_to: 'До: {time}',
+    btn_quiet_hours: '🌙 Тихие часы',
+    quiet_title: '🌙 *Тихие часы*\n\n',
+    quiet_status_on: 'Статус: ✅ Включены',
+    quiet_status_off: 'Статус: ❌ Выключены',
+    quiet_from: '🕐 С: {time}',
+    quiet_to: '🕐 До: {time}',
+    quiet_on_toast: 'Тихие часы включены',
+    quiet_off_toast: 'Тихие часы выключены',
+    btn_quiet_on: '🔔 Включить',
+    btn_quiet_off: '🔕 Выключить',
+    btn_quiet_from: '🕐 С: {time}',
+    btn_quiet_to: '🕐 До: {time}',
+    quiet_from_prompt: '🕐 Начало тихих часов\n\nТекущее время: *{current}*\n\nВведите время начала в формате ЧЧ:ММ (например, 23:00):',
+    quiet_to_prompt: '🕐 Конец тихих часов\n\nТекущее время: *{current}*\n\nВведите время окончания в формате ЧЧ:ММ (например, 07:00):',
+    quiet_from_updated: '✅ Начало тихих часов обновлено: {time}',
+    quiet_to_updated: '✅ Конец тихих часов обновлено: {time}',
+    quiet_label: '🌙 Тихие часы: {value}',
+    // Weekly report (#45)
+    btn_weekly_report: '📊 Недельный отчёт',
+    weekly_title: '📊 *Еженедельный отчёт*\n\n',
+    weekly_status_on: 'Статус: ✅ Включён',
+    weekly_status_off: 'Статус: ❌ Выключен',
+    weekly_on_toast: 'Еженедельный отчёт включён',
+    weekly_off_toast: 'Еженедельный отчёт выключен',
+    btn_weekly_on: '🔔 Включить',
+    btn_weekly_off: '🔕 Выключить',
+    weekly_label: '📊 Недельный отчёт: {value}',
     // Notification style (#113)
     notif_style_title: 'Стиль уведомлений:',
     notif_style_brief: 'Краткие',
@@ -662,6 +692,8 @@ export default {
     trend_up: '↑ с {prev}%',
     trend_down: '↓ с {prev}%',
     trend_same: '→ без изменений',
+    // Overall streak on menu (#37)
+    streak_menu: '🔥 {count} дней подряд без пропусков!',
     // Worst time (#36)
     worst_time: '⚠️ Чаще всего пропускаете: {time} — {pct}% пропусков',
     // Per-medicine stats (#38)
@@ -783,6 +815,12 @@ export default {
     btn_later: 'Позже',
     // Weekly report (#45)
     weekly_title: '📊 *Еженедельный отчёт*\n\n',
+    weekly_adherence: '💊 Соблюдение приёмов: {pct}% ({taken}/{planned})',
+    weekly_expiring: '⚠️ Истекает скоро: {count} {word}',
+    weekly_low_stock: '📉 Заканчивается: {count} {word}',
+    weekly_shopping: '🛒 В списке покупок: {count}',
+    weekly_no_data: 'На этой неделе нет данных для отчёта.',
+    weekly_perfect: '🎉 Отличная неделя! Все приёмы выполнены.',
     // Inactive reminder (#89)
     inactive_reminder: 'Вы давно не заходили. У вас {count} непринятых лекарств. /menu',
   },

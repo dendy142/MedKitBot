@@ -1,6 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { getIntakeLogsForPeriod } from '../db/queries/intakeLogs.js';
 import { getUserActiveSchedules } from '../db/queries/schedules.js';
+import { supabase } from '../db/supabase.js';
 import ru from '../locales/ru.js';
 
 /**
@@ -94,6 +95,132 @@ function calculateStreak(logs, timezone) {
 }
 
 /**
+ * Compute previous period date range for trend comparison (#35)
+ */
+function getPrevDateRange(period, timezone) {
+  const userNow = getUserNow(timezone);
+
+  if (period === 'week') {
+    const prevEnd = new Date(userNow);
+    prevEnd.setDate(prevEnd.getDate() - 7);
+    prevEnd.setHours(23, 59, 59, 999);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevStart.getDate() - 6);
+    prevStart.setHours(0, 0, 0, 0);
+    return { prevStart, prevEnd };
+  }
+
+  if (period === 'month') {
+    const prevEnd = new Date(userNow);
+    prevEnd.setDate(prevEnd.getDate() - 30);
+    prevEnd.setHours(23, 59, 59, 999);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevStart.getDate() - 29);
+    prevStart.setHours(0, 0, 0, 0);
+    return { prevStart, prevEnd };
+  }
+
+  return null;
+}
+
+/**
+ * Get adherence percentage for a period (#35)
+ */
+async function getPrevPeriodPercent(userId, prevStart, prevEnd) {
+  const { data: prevLogs } = await supabase
+    .from('intake_logs')
+    .select('status')
+    .eq('user_id', userId)
+    .gte('planned_at', prevStart.toISOString())
+    .lt('planned_at', prevEnd.toISOString());
+
+  if (!prevLogs || prevLogs.length === 0) return null;
+  return Math.round(prevLogs.filter(l => l.status === 'taken').length / prevLogs.length * 100);
+}
+
+/**
+ * Build trend string comparing current vs previous period (#35)
+ */
+function buildTrendText(ctx, currentPct, prevPct) {
+  if (prevPct === null) return '';
+  if (currentPct > prevPct) return ' ' + ctx.t('stats.trend_up', { prev: prevPct });
+  if (currentPct < prevPct) return ' ' + ctx.t('stats.trend_down', { prev: prevPct });
+  return ' ' + ctx.t('stats.trend_same');
+}
+
+/**
+ * Find worst time of day for skipped doses (#36)
+ */
+async function getWorstTimeOfDay(userId, startDate) {
+  const { data: skippedLogs } = await supabase
+    .from('intake_logs')
+    .select('planned_at, schedules(time_value)')
+    .eq('user_id', userId)
+    .eq('status', 'skipped')
+    .gte('planned_at', startDate.toISOString());
+
+  if (!skippedLogs || skippedLogs.length === 0) return null;
+
+  // Group by time_value
+  const byTime = {};
+  for (const log of skippedLogs) {
+    const time = log.schedules?.time_value;
+    if (!time) continue;
+    byTime[time] = (byTime[time] || 0) + 1;
+  }
+
+  const times = Object.entries(byTime);
+  if (times.length === 0) return null;
+
+  times.sort((a, b) => b[1] - a[1]);
+  const [worstTime, worstCount] = times[0];
+  const totalSkipped = skippedLogs.length;
+  const pct = Math.round(worstCount / totalSkipped * 100);
+
+  return { time: worstTime, pct };
+}
+
+/**
+ * Calculate overall streak across all medicines (#37)
+ */
+async function getOverallStreak(userId, timezone) {
+  const { data: logs } = await supabase
+    .from('intake_logs')
+    .select('planned_at, status')
+    .eq('user_id', userId)
+    .order('planned_at', { ascending: false });
+
+  if (!logs || logs.length === 0) return 0;
+
+  // Group by date
+  const byDate = {};
+  for (const log of logs) {
+    const d = new Date(log.planned_at);
+    const dateStr = d.toLocaleDateString('en-CA', { timeZone: timezone });
+    if (!byDate[dateStr]) byDate[dateStr] = [];
+    byDate[dateStr].push(log);
+  }
+
+  const dates = Object.keys(byDate).sort().reverse();
+  let streak = 0;
+
+  for (const dateStr of dates) {
+    const dayLogs = byDate[dateStr];
+    const allTaken = dayLogs.every(l => l.status === 'taken');
+    const hasPending = dayLogs.some(l => l.status === 'pending');
+    if (allTaken && !hasPending) {
+      streak++;
+    } else if (hasPending) {
+      continue;
+    } else {
+      break;
+    }
+  }
+
+  return streak;
+}
+
+/**
  * Build day-by-day visual for a medicine's logs (only for week period)
  */
 function buildDayVisual(logs, start, end, timezone) {
@@ -126,7 +253,14 @@ function buildDayVisual(logs, start, end, timezone) {
  * Show stats menu
  */
 async function showStatsMenu(ctx) {
-  const text = ctx.t('stats.title');
+  const timezone = ctx.dbUser.timezone || 'Etc/GMT-3';
+  const streak = await getOverallStreak(ctx.dbUser.id, timezone);
+
+  let text = ctx.t('stats.title');
+  if (streak > 0) {
+    text += '\n\n' + ctx.t('stats.streak_menu', { count: streak });
+  }
+
   const keyboard = new InlineKeyboard()
     .text(ctx.t('stats.btn_today'), 'stats:today')
     .text(ctx.t('stats.btn_week'), 'stats:week')
@@ -214,7 +348,27 @@ async function showStatsForPeriod(ctx, period) {
 
   let text = ctx.t('stats.result_title', { period: periodLabel });
   text += lines.join('\n\n');
-  text += '\n\n' + ctx.t('stats.result_total', { taken: totalTaken, planned: totalPlanned, pct: totalPct });
+
+  // Build total line with trend (#35)
+  let totalLine = ctx.t('stats.result_total', { taken: totalTaken, planned: totalPlanned, pct: totalPct });
+
+  if (period === 'week' || period === 'month') {
+    const prevRange = getPrevDateRange(period, timezone);
+    if (prevRange) {
+      const prevPct = await getPrevPeriodPercent(ctx.dbUser.id, prevRange.prevStart, prevRange.prevEnd);
+      totalLine += buildTrendText(ctx, totalPct, prevPct);
+    }
+  }
+
+  text += '\n\n' + totalLine;
+
+  // Worst time of day (#36)
+  if (period === 'week' || period === 'month') {
+    const worstTime = await getWorstTimeOfDay(ctx.dbUser.id, start);
+    if (worstTime) {
+      text += '\n' + ctx.t('stats.worst_time', { time: worstTime.time, pct: worstTime.pct });
+    }
+  }
 
   const keyboard = new InlineKeyboard()
     .text(ctx.t('common.back'), 'stats');

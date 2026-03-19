@@ -17,6 +17,8 @@ async function showSettings(ctx) {
   text += ctx.t('settings.notif_expiry', { value: s.notifications?.expiry_alerts ? '✅' : '❌' }) + '\n';
   text += ctx.t('settings.notif_stock', { value: s.notifications?.low_stock_alerts ? '✅' : '❌' }) + '\n';
   text += ctx.t('settings.digest_label', { value: s.digest?.enabled ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.quiet_label', { value: s.quiet_hours?.enabled ? '✅' : '❌' }) + '\n';
+  text += ctx.t('settings.weekly_label', { value: s.weeklyReport ? '✅' : '❌' }) + '\n';
 
   const keyboard = new InlineKeyboard()
     .text(ctx.t('settings.btn_timezone'), 'set:tz')
@@ -28,6 +30,10 @@ async function showSettings(ctx) {
     .text(ctx.t('settings.btn_periods'), 'set:periods')
     .row()
     .text(ctx.t('settings.btn_digest'), 'set:digest')
+    .row()
+    .text(ctx.t('settings.btn_quiet_hours'), 'settings:quiet_hours')
+    .row()
+    .text(ctx.t('settings.btn_weekly_report'), 'set:weekly_report')
     .row()
     .text(ctx.t('settings.btn_display'), 'set:display')
     .row()
@@ -354,6 +360,81 @@ export function registerSettingsHandlers(bot) {
       .text(ctx.t('common.back'), 'settings');
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
+
+  // --- Quiet Hours (#42) ---
+  bot.callbackQuery('settings:quiet_hours', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showQuietHoursMenu(ctx);
+  });
+
+  bot.callbackQuery('set:quiet:toggle', async (ctx) => {
+    const s = { ...(ctx.dbUser.settings || DEFAULT_SETTINGS) };
+    s.quiet_hours = { ...(s.quiet_hours || { enabled: false, from: '23:00', to: '07:00' }) };
+    s.quiet_hours.enabled = !s.quiet_hours.enabled;
+    await updateUserSettings(ctx.dbUser.id, s);
+    ctx.dbUser.settings = s;
+    await ctx.answerCallbackQuery(s.quiet_hours.enabled ? ctx.t('settings.quiet_on_toast') : ctx.t('settings.quiet_off_toast'));
+    await showQuietHoursMenu(ctx);
+  });
+
+  bot.callbackQuery('set:quiet:from', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+    const qh = s.quiet_hours || { enabled: false, from: '23:00', to: '07:00' };
+
+    const msg = await ctx.editMessageText(
+      ctx.t('settings.quiet_from_prompt', { current: qh.from }),
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'settings:quiet_hours'),
+      }
+    );
+
+    await supabase.from('sessions').upsert({
+      key: `state:${ctx.dbUser.id}`,
+      value: {
+        action: 'set_quiet_from',
+        msgId: msg.message_id,
+      },
+    });
+  });
+
+  bot.callbackQuery('set:quiet:to', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+    const qh = s.quiet_hours || { enabled: false, from: '23:00', to: '07:00' };
+
+    const msg = await ctx.editMessageText(
+      ctx.t('settings.quiet_to_prompt', { current: qh.to }),
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), 'settings:quiet_hours'),
+      }
+    );
+
+    await supabase.from('sessions').upsert({
+      key: `state:${ctx.dbUser.id}`,
+      value: {
+        action: 'set_quiet_to',
+        msgId: msg.message_id,
+      },
+    });
+  });
+
+  // --- Weekly Report (#45) ---
+  bot.callbackQuery('set:weekly_report', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showWeeklyReportMenu(ctx);
+  });
+
+  bot.callbackQuery('set:weekly:toggle', async (ctx) => {
+    const s = { ...(ctx.dbUser.settings || DEFAULT_SETTINGS) };
+    s.weeklyReport = !s.weeklyReport;
+    await updateUserSettings(ctx.dbUser.id, s);
+    ctx.dbUser.settings = s;
+    await ctx.answerCallbackQuery(s.weeklyReport ? ctx.t('settings.weekly_on_toast') : ctx.t('settings.weekly_off_toast'));
+    await showWeeklyReportMenu(ctx);
+  });
 }
 
 // --- Helper: show day periods menu ---
@@ -393,6 +474,44 @@ async function showDigestMenu(ctx) {
     .text(dg.enabled ? ctx.t('settings.btn_digest_off') : ctx.t('settings.btn_digest_on'), 'set:digest:toggle')
     .row()
     .text(ctx.t('settings.btn_digest_time', { time: digestTime }), 'set:digest:time')
+    .row()
+    .text(ctx.t('common.back'), 'settings');
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+// --- Helper: show quiet hours menu ---
+async function showQuietHoursMenu(ctx) {
+  const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+  const qh = s.quiet_hours || { enabled: false, from: '23:00', to: '07:00' };
+
+  const text = ctx.t('settings.quiet_title') +
+    (qh.enabled ? ctx.t('settings.quiet_status_on') : ctx.t('settings.quiet_status_off')) + '\n' +
+    ctx.t('settings.quiet_from', { time: qh.from }) + '\n' +
+    ctx.t('settings.quiet_to', { time: qh.to });
+
+  const keyboard = new InlineKeyboard()
+    .text(qh.enabled ? ctx.t('settings.btn_quiet_off') : ctx.t('settings.btn_quiet_on'), 'set:quiet:toggle')
+    .row()
+    .text(ctx.t('settings.btn_quiet_from', { time: qh.from }), 'set:quiet:from')
+    .row()
+    .text(ctx.t('settings.btn_quiet_to', { time: qh.to }), 'set:quiet:to')
+    .row()
+    .text(ctx.t('common.back'), 'settings');
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+// --- Helper: show weekly report menu ---
+async function showWeeklyReportMenu(ctx) {
+  const s = ctx.dbUser.settings || DEFAULT_SETTINGS;
+  const enabled = !!s.weeklyReport;
+
+  const text = ctx.t('settings.weekly_title') +
+    (enabled ? ctx.t('settings.weekly_status_on') : ctx.t('settings.weekly_status_off'));
+
+  const keyboard = new InlineKeyboard()
+    .text(enabled ? ctx.t('settings.btn_weekly_off') : ctx.t('settings.btn_weekly_on'), 'set:weekly:toggle')
     .row()
     .text(ctx.t('common.back'), 'settings');
 
@@ -514,6 +633,70 @@ export async function handleSettingsTextState(state, text, ctx) {
       .text(dg.enabled ? ctx.t('settings.btn_digest_off') : ctx.t('settings.btn_digest_on'), 'set:digest:toggle')
       .row()
       .text(ctx.t('settings.btn_digest_time', { time: dg.time }), 'set:digest:time')
+      .row()
+      .text(ctx.t('common.back'), 'settings');
+
+    await ctx.api.editMessageText(ctx.chat.id, state.msgId, menuText, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    });
+
+    return 'handled';
+  }
+
+  if (state.action === 'set_quiet_from' || state.action === 'set_quiet_to') {
+    const isFrom = state.action === 'set_quiet_from';
+    const cancelCallback = 'settings:quiet_hours';
+
+    const timeMatch = text.match(/^(\d{1,2}):(\d{2})$/);
+    if (!timeMatch) {
+      await ctx.api.editMessageText(ctx.chat.id, state.msgId,
+        ctx.t('settings.time_invalid'),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), cancelCallback),
+        }
+      );
+      return 'keep_state';
+    }
+
+    const hours = parseInt(timeMatch[1]);
+    const minutes = parseInt(timeMatch[2]);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      await ctx.api.editMessageText(ctx.chat.id, state.msgId,
+        ctx.t('settings.time_invalid_range'),
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard().text(ctx.t('common.cancel'), cancelCallback),
+        }
+      );
+      return 'keep_state';
+    }
+
+    const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    const s = { ...(ctx.dbUser.settings || DEFAULT_SETTINGS) };
+    s.quiet_hours = { ...(s.quiet_hours || { enabled: false, from: '23:00', to: '07:00' }) };
+    if (isFrom) {
+      s.quiet_hours.from = timeStr;
+    } else {
+      s.quiet_hours.to = timeStr;
+    }
+    await updateUserSettings(ctx.dbUser.id, s);
+    ctx.dbUser.settings = s;
+
+    const qh = s.quiet_hours;
+    const menuText = ctx.t('settings.quiet_title') +
+      (qh.enabled ? ctx.t('settings.quiet_status_on') : ctx.t('settings.quiet_status_off')) + '\n' +
+      ctx.t('settings.quiet_from', { time: qh.from }) + '\n' +
+      ctx.t('settings.quiet_to', { time: qh.to }) + '\n\n' +
+      (isFrom ? ctx.t('settings.quiet_from_updated', { time: timeStr }) : ctx.t('settings.quiet_to_updated', { time: timeStr }));
+
+    const keyboard = new InlineKeyboard()
+      .text(qh.enabled ? ctx.t('settings.btn_quiet_off') : ctx.t('settings.btn_quiet_on'), 'set:quiet:toggle')
+      .row()
+      .text(ctx.t('settings.btn_quiet_from', { time: qh.from }), 'set:quiet:from')
+      .row()
+      .text(ctx.t('settings.btn_quiet_to', { time: qh.to }), 'set:quiet:to')
       .row()
       .text(ctx.t('common.back'), 'settings');
 

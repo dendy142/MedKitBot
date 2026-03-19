@@ -12,10 +12,19 @@ import { showForWhomPicker } from './profiles.js';
 async function getState(userId) {
   const { data } = await supabase
     .from('sessions')
-    .select('value')
+    .select('value, updated_at')
     .eq('key', `addmed:${userId}`)
     .single();
-  return data?.value ?? null;
+  if (!data) return null;
+  // #66 Session timeout — clear sessions older than 24 hours
+  if (data.updated_at) {
+    const age = Date.now() - new Date(data.updated_at).getTime();
+    if (age > 24 * 60 * 60 * 1000) {
+      await supabase.from('sessions').delete().eq('key', `addmed:${userId}`);
+      return null;
+    }
+  }
+  return data.value ?? null;
 }
 
 async function setState(userId, state) {

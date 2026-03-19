@@ -1,7 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { getMedicine, updateMedicine, archiveMedicine, restoreMedicine, toggleFavorite, getArchivedMedicines, createMedicine } from '../db/queries/medicines.js';
 import { getMedkit, getUserMedkits } from '../db/queries/medkits.js';
-import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUntil, progressBar } from '../utils/format.js';
+import { formatQuantity, formatExpiry, formatDate, medicineStatusEmoji, daysUntil, progressBar, breadcrumb } from '../utils/format.js';
 import { logAction, logMedicineChange } from '../middleware/logging.js';
 import { getMedicineHistory } from '../db/queries/actionLogs.js';
 import { supabase } from '../db/supabase.js';
@@ -41,7 +41,10 @@ async function showMedicineCard(ctx, medicineId) {
   }
   if (med.is_favorite) badges += '⭐';
 
-  let text = `💊 *${med.name}*${med.dosage ? ' ' + med.dosage : ''}${badges ? ' ' + badges : ''}\n`;
+  // #1 Breadcrumb: 🏠 › Medkit Name › Medicine Name
+  const medkit = await getMedkit(med.medkit_id, ctx.dbUser.id);
+  const crumb = breadcrumb(ctx.t('common.breadcrumb_home'), medkit?.name, med.name);
+  let text = `${crumb}\n\n💊 *${med.name}*${med.dosage ? ' ' + med.dosage : ''}${badges ? ' ' + badges : ''}\n`;
 
   if (med.category) text += `🏷 ${med.category}`;
   if (med.tags && med.tags.length > 0) {
@@ -152,6 +155,7 @@ async function showMedicineCard(ctx, medicineId) {
     keyboard.text(ctx.t('medicine.btn_photos', { count: med.photo_file_ids.length }), `med:${med.id}:photos`);
   }
   keyboard.text(ctx.t('medicine.btn_history'), `med:${med.id}:history`);
+  keyboard.text(ctx.t('profile.btn_notes'), `mednotes:${med.id}`);
   keyboard.row();
   keyboard.text(ctx.t('medicine.btn_shop'), `med:${med.id}:shop`);
   keyboard.text(ctx.t('medicine.btn_archive'), `med:${med.id}:archive`);

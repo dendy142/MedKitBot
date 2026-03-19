@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getUserMedkits, getMedkit, createMedkit, renameMedkit, deleteMedkit, countMedkitMedicines } from '../db/queries/medkits.js';
 import { getMedkitMedicines } from '../db/queries/medicines.js';
 import { addPagination, paginateItems } from '../keyboards/pagination.js';
-import { medicineStatusEmoji, formatQuantity, formatExpiry, daysUntil, truncate } from '../utils/format.js';
+import { medicineStatusEmoji, formatQuantity, daysUntil, truncate, breadcrumb, relativeDate } from '../utils/format.js';
 import { logAction } from '../middleware/logging.js';
 import { startAddMedicine } from './addMedicine.js';
 import { supabase } from '../db/supabase.js';
@@ -100,11 +100,17 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
     medicines = medicines.filter(m => m.category === filterValue);
   } else if (filterField === 'tag' && filterValue) {
     medicines = medicines.filter(m => m.tags && m.tags.includes(filterValue));
+  } else if (filterField === 'profile' && filterValue === 'general') {
+    medicines = medicines.filter(m => !m.profile_id);
+  } else if (filterField === 'profile' && filterValue && filterValue !== 'all') {
+    medicines = medicines.filter(m => m.profile_id === filterValue);
   }
 
   const pageItems = paginateItems(medicines, page);
 
-  let text = ctx.t('medkit.title', { name: medkit.name, count: medicines.length });
+  // #1 Breadcrumb: 🏠 › Medkit Name
+  const crumb = breadcrumb(ctx.t('common.breadcrumb_home'), medkit.name);
+  let text = `${crumb}\n\n` + ctx.t('medkit.title', { name: medkit.name, count: medicines.length });
   if (filterField) {
     const filterType = filterField === 'category' ? ctx.t('medkit.filter_category') : ctx.t('medkit.filter_tag');
     text += ctx.t('medkit.filter_active', { type: filterType, value: filterValue });
@@ -114,7 +120,8 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
   for (const med of pageItems) {
     const emoji = medicineStatusEmoji(med, settings.thresholds);
     const qty = formatQuantity(med.quantity, med.quantity_unit);
-    const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format) : '';
+    // #9 Use relativeDate for expiry display
+    const expiry = med.expiry_date ? relativeDate(med.expiry_date) : '';
     text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
     text += ctx.t('medkit.med_line_remainder', { qty }) + (expiry ? ctx.t('medkit.med_line_expiry', { expiry }) : '') + '\n';
   }
@@ -141,6 +148,7 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
   keyboard.text(ctx.t('medkit.btn_sort'), `medkit:${medkitId}:sort`);
   keyboard.text(ctx.t('medkit.btn_filter'), `medkit:${medkitId}:filter`);
   keyboard.row();
+  keyboard.text(ctx.t('profile.btn_filter_profile'), `medkit:${medkitId}:filter:profile`);
   keyboard.text(ctx.t('sharing.btn_share_list'), `medkit:${medkitId}:share_list`);
   keyboard.text(ctx.t('sharing.btn_doctor'), `medkit:${medkitId}:doctor`);
   keyboard.row();
@@ -148,6 +156,10 @@ async function showMedkit(ctx, medkitId, page = 0, { filterField, filterValue } 
   keyboard.text(ctx.t('medkit.btn_edit'), `medkit:${medkitId}:rename`);
   keyboard.text(ctx.t('medkit.btn_delete'), `medkit:${medkitId}:delete`);
   keyboard.row();
+  // #22 Multiselect
+  if (medicines.length > 0) {
+    keyboard.text(ctx.t('medkit.btn_multiselect'), `multiselect:${medkitId}:start`);
+  }
   keyboard.text(ctx.t('medkit.btn_archive'), `medkit:${medkitId}:archive`);
   keyboard.text(ctx.t('common.back'), 'medkits');
 
@@ -348,7 +360,8 @@ export function registerMedkitHandlers(bot) {
     for (const med of pageItems) {
       const emoji = medicineStatusEmoji(med, settings.thresholds);
       const qty = formatQuantity(med.quantity, med.quantity_unit);
-      const expiry = med.expiry_date ? formatExpiry(med.expiry_date, settings.display?.date_format) : '';
+      // #9 Use relativeDate for expiry display
+    const expiry = med.expiry_date ? relativeDate(med.expiry_date) : '';
       text += `${emoji} *${med.name}*${med.dosage ? ' ' + med.dosage : ''}\n`;
       text += ctx.t('medkit.med_line_remainder', { qty }) + (expiry ? ctx.t('medkit.med_line_expiry', { expiry }) : '') + '\n';
     }
@@ -463,8 +476,227 @@ export function registerMedkitHandlers(bot) {
     await showMedkit(ctx, medkitId, 0, { filterField: 'tag', filterValue: tag });
   });
 
+  // #49 Apply profile filter
+  bot.callbackQuery(/^medkit:([0-9a-f-]+):filter:profile:(all|general|[0-9a-f-]+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    const profileVal = ctx.match[2];
+    if (profileVal === 'all') {
+      await showMedkit(ctx, medkitId, 0);
+    } else {
+      await showMedkit(ctx, medkitId, 0, { filterField: 'profile', filterValue: profileVal });
+    }
+  });
+
   // Share placeholder
   bot.callbackQuery(/^medkit:([0-9a-f-]+):share$/, async (ctx) => {
     await ctx.answerCallbackQuery(ctx.t('common.feature_wip'));
   });
+
+  // ── #22 Multiselect ──────────────────────────────────────────────
+
+  // Start multiselect mode
+  bot.callbackQuery(/^multiselect:([0-9a-f-]+):start$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    // Store empty selection in session
+    await supabase.from('sessions').upsert(
+      { key: `multiselect:${ctx.dbUser.id}`, value: { medkitId, selected: [] }, updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    await renderMultiselect(ctx, medkitId, []);
+  });
+
+  // Toggle medicine selection
+  bot.callbackQuery(/^multiselect:med:([0-9a-f-]+):toggle$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medId = ctx.match[1];
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('value')
+      .eq('key', `multiselect:${ctx.dbUser.id}`)
+      .single();
+    if (!session?.value) return;
+    const state = session.value;
+    const idx = state.selected.indexOf(medId);
+    if (idx >= 0) {
+      state.selected.splice(idx, 1);
+    } else {
+      state.selected.push(medId);
+    }
+    await supabase.from('sessions').upsert(
+      { key: `multiselect:${ctx.dbUser.id}`, value: state, updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    await renderMultiselect(ctx, state.medkitId, state.selected);
+  });
+
+  // Multiselect action: move — show medkit picker
+  bot.callbackQuery('multiselect:action:move', async (ctx) => {
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('value')
+      .eq('key', `multiselect:${ctx.dbUser.id}`)
+      .single();
+    if (!session?.value || session.value.selected.length === 0) {
+      return ctx.answerCallbackQuery({ text: ctx.t('medkit.multiselect_empty'), show_alert: true });
+    }
+    await ctx.answerCallbackQuery();
+    const state = session.value;
+    const medkits = await getUserMedkits(ctx.dbUser.id);
+    const otherMedkits = medkits.filter(mk => mk.id !== state.medkitId);
+    if (otherMedkits.length === 0) {
+      return ctx.editMessageText(ctx.t('medkit.multiselect_no_other_medkits'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('common.back'), `multiselect:${state.medkitId}:start`),
+      });
+    }
+    const keyboard = new InlineKeyboard();
+    for (const mk of otherMedkits) {
+      keyboard.text(mk.name, `multiselect:move:${mk.id}`).row();
+    }
+    keyboard.text(ctx.t('common.back'), `multiselect:${state.medkitId}:start`);
+    await ctx.editMessageText(
+      ctx.t('medkit.multiselect_move_title', { count: state.selected.length }),
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  });
+
+  // Multiselect move — execute
+  bot.callbackQuery(/^multiselect:move:([0-9a-f-]+)$/, async (ctx) => {
+    const targetMedkitId = ctx.match[1];
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('value')
+      .eq('key', `multiselect:${ctx.dbUser.id}`)
+      .single();
+    if (!session?.value) return;
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
+    const state = session.value;
+    const targetMedkit = await getMedkit(targetMedkitId, ctx.dbUser.id);
+    if (!targetMedkit) return;
+    for (const medId of state.selected) {
+      await supabase.from('medicines').update({ medkit_id: targetMedkitId }).eq('id', medId);
+    }
+    await supabase.from('sessions').delete().eq('key', `multiselect:${ctx.dbUser.id}`);
+    await ctx.editMessageText(
+      ctx.t('medkit.multiselect_move_done', { count: state.selected.length, target: targetMedkit.name }),
+      { reply_markup: new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${state.medkitId}`) }
+    );
+  });
+
+  // Multiselect action: archive — confirm
+  bot.callbackQuery('multiselect:action:archive', async (ctx) => {
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('value')
+      .eq('key', `multiselect:${ctx.dbUser.id}`)
+      .single();
+    if (!session?.value || session.value.selected.length === 0) {
+      return ctx.answerCallbackQuery({ text: ctx.t('medkit.multiselect_empty'), show_alert: true });
+    }
+    await ctx.answerCallbackQuery();
+    const state = session.value;
+    await ctx.editMessageText(
+      ctx.t('medkit.multiselect_archive_confirm', { count: state.selected.length }),
+      {
+        reply_markup: new InlineKeyboard()
+          .text(ctx.t('common.yes'), 'multiselect:archive:confirm')
+          .text(ctx.t('common.no'), `multiselect:${state.medkitId}:start`),
+      }
+    );
+  });
+
+  // Multiselect archive — execute
+  bot.callbackQuery('multiselect:archive:confirm', async (ctx) => {
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('value')
+      .eq('key', `multiselect:${ctx.dbUser.id}`)
+      .single();
+    if (!session?.value) return;
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
+    const state = session.value;
+    for (const medId of state.selected) {
+      await supabase.from('medicines').update({ is_archived: true }).eq('id', medId);
+    }
+    await supabase.from('sessions').delete().eq('key', `multiselect:${ctx.dbUser.id}`);
+    await ctx.editMessageText(
+      ctx.t('medkit.multiselect_archive_done', { count: state.selected.length }),
+      { reply_markup: new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${state.medkitId}`) }
+    );
+  });
+
+  // Multiselect action: delete — confirm
+  bot.callbackQuery('multiselect:action:delete', async (ctx) => {
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('value')
+      .eq('key', `multiselect:${ctx.dbUser.id}`)
+      .single();
+    if (!session?.value || session.value.selected.length === 0) {
+      return ctx.answerCallbackQuery({ text: ctx.t('medkit.multiselect_empty'), show_alert: true });
+    }
+    await ctx.answerCallbackQuery();
+    const state = session.value;
+    await ctx.editMessageText(
+      ctx.t('medkit.multiselect_delete_confirm', { count: state.selected.length }),
+      {
+        reply_markup: new InlineKeyboard()
+          .text(ctx.t('common.yes_delete'), 'multiselect:delete:confirm')
+          .text(ctx.t('common.no'), `multiselect:${state.medkitId}:start`),
+      }
+    );
+  });
+
+  // Multiselect delete — execute
+  bot.callbackQuery('multiselect:delete:confirm', async (ctx) => {
+    const { data: session } = await supabase
+      .from('sessions')
+      .select('value')
+      .eq('key', `multiselect:${ctx.dbUser.id}`)
+      .single();
+    if (!session?.value) return;
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
+    const state = session.value;
+    for (const medId of state.selected) {
+      await supabase.from('medicines').delete().eq('id', medId);
+    }
+    await supabase.from('sessions').delete().eq('key', `multiselect:${ctx.dbUser.id}`);
+    await ctx.editMessageText(
+      ctx.t('medkit.multiselect_delete_done', { count: state.selected.length }),
+      { reply_markup: new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${state.medkitId}`) }
+    );
+  });
+
+  // Multiselect cancel
+  bot.callbackQuery(/^multiselect:([0-9a-f-]+):cancel$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const medkitId = ctx.match[1];
+    await supabase.from('sessions').delete().eq('key', `multiselect:${ctx.dbUser.id}`);
+    await showMedkit(ctx, medkitId);
+  });
+}
+
+/**
+ * #22 Render multiselect view for a medkit
+ */
+async function renderMultiselect(ctx, medkitId, selected) {
+  const medicines = await getMedkitMedicines(medkitId);
+  const text = ctx.t('medkit.multiselect_title', { count: selected.length });
+
+  const keyboard = new InlineKeyboard();
+  for (const med of medicines) {
+    const isSelected = selected.includes(med.id);
+    const icon = isSelected ? '☑️' : '☐';
+    keyboard.text(`${icon} ${med.name}`, `multiselect:med:${med.id}:toggle`).row();
+  }
+
+  // Action bar
+  keyboard.text(ctx.t('medkit.btn_multiselect_move'), 'multiselect:action:move');
+  keyboard.text(ctx.t('medkit.btn_multiselect_archive'), 'multiselect:action:archive');
+  keyboard.row();
+  keyboard.text(ctx.t('medkit.btn_multiselect_delete'), 'multiselect:action:delete');
+  keyboard.text(ctx.t('medkit.btn_multiselect_cancel'), `multiselect:${medkitId}:cancel`);
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 }

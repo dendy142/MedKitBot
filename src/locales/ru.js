@@ -38,6 +38,7 @@ export default {
     updated: 'Обновлено',
     cancelled: 'Отменено',
     feature_wip: 'Скоро! Функция в разработке.',
+    breadcrumb_home: '🏠',
   },
 
   // ── Main menu / Dashboard ────────────────────────────────────────
@@ -122,6 +123,16 @@ export default {
     btn_multiselect_move: '📦 Переместить',
     btn_multiselect_archive: '🗄 Архивировать',
     btn_multiselect_delete: '🗑 Удалить',
+    btn_multiselect_cancel: '❌ Отмена',
+    multiselect_title: '☑️ *Групповые операции*\n\nВыбрано: {count}\nОтметьте лекарства для действия.',
+    multiselect_empty: '⚠️ Ничего не выбрано. Отметьте хотя бы одно лекарство.',
+    multiselect_move_title: '📦 *Переместить выбранные ({count})*\n\nВыберите аптечку:',
+    multiselect_move_done: '✅ Перемещено {count} лекарств в «{target}».',
+    multiselect_archive_confirm: '🗄 Архивировать {count} лекарств?',
+    multiselect_archive_done: '✅ {count} лекарств перемещено в архив.',
+    multiselect_delete_confirm: '🗑 Удалить навсегда {count} лекарств? Это действие нельзя отменить.',
+    multiselect_delete_done: '✅ {count} лекарств удалено.',
+    multiselect_no_other_medkits: '⚠️ Нет других аптечек для перемещения.',
   },
 
   // ── Medicine card & actions ──────────────────────────────────────
@@ -272,6 +283,8 @@ export default {
     confirm_quantity: '📏 *Количество:* {value}',
     confirm_photos: '📷 *Фото:* {value}',
     confirm_notes: '📝 *Заметки:* {value}',
+    // Edit (preview)
+    btn_edit: '✏️ Изменить',
     // Cancel
     cancel_toast: 'Отменено',
     cancel_confirm: '❌ Данные будут потеряны. Отменить?',
@@ -871,6 +884,10 @@ export default {
     weekly_perfect: '🎉 Отличная неделя! Все приёмы выполнены.',
     // Inactive reminder (#89)
     inactive_reminder: 'Вы давно не заходили. У вас {count} непринятых лекарств. /menu',
+    // Adaptive reminders (#43)
+    adaptive_suggest: '💡 Вы обычно принимаете *{name}* раньше запланированного времени. Сдвинуть напоминание на {minutes} мин раньше?',
+    btn_shift_yes: '✅ Да, сдвинуть',
+    btn_shift_no: '❌ Нет',
   },
 
   // ── Achievements (#90) ───────────────────────────────────────────
@@ -985,6 +1002,16 @@ export default {
     skip_reason_other: '✏️ Другое',
     skip_reason_other_prompt: '✏️ Введите причину пропуска:',
     skip_reason_saved_toast: 'Причина сохранена',
+    // Medicine notes button (#61)
+    btn_notes: '📝 Заметки',
+    // Stats by profile button (#50)
+    btn_by_profile: '👤 По профилю',
+    // Export by profile button (#63)
+    btn_export_by_profile: '👤 По профилю',
+    // Filter by profile in medkit (#49)
+    btn_filter_profile: '👤 Фильтр',
+    // Intake note after taken (#57)
+    intake_note_btn: '📝 Заметка',
   },
 
   // ── Wellbeing (#59-60) ───────────────────────────────────────────
@@ -1157,6 +1184,15 @@ export default {
     label: '📅 Формат дат: {value}',
   },
 
+  // ── Menu layout (#114) ─────────────────────────────────────────
+  menu_layout: {
+    label: '📱 Меню: {value}',
+    default: 'Стандартное',
+    compact: 'Компактное',
+    btn_toggle: '📱 Вид меню: {current}',
+    toast: 'Вид меню изменён: {value}',
+  },
+
   // ── Courses (#104) ──────────────────────────────────────────────
   course: {
     btn_create: '➕ Создать курс',
@@ -1166,6 +1202,22 @@ export default {
     btn_schedules: '📆 Расписания',
     btn_pause_all: '⏸ Приостановить',
     btn_complete: '✅ Завершить',
+    // i18n (#112)
+    list_title: '📋 *Курсы лечения*\n\n',
+    list_empty: '_Нет созданных курсов._\n',
+    no_medicines: '_Нет привязанных лекарств._\n',
+    medicines_header: '💊 *Лекарства:*\n',
+    medicine_item: '  • {name}{dosage}\n',
+    btn_resume: '▶️ Возобновить',
+    btn_add_medicines: '➕ Добавить лекарства',
+    btn_delete: '🗑 Удалить курс',
+    schedules_title: '📆 *Расписания курса:*\n\n',
+    schedule_med_title: '💊 *{name}*\n',
+    schedule_item: '  ⏰ {time} — {dose} {unit}\n',
+    no_schedules: '_Нет активных расписаний._\n',
+    created: '✅ Курс *«{name}»* создан!\n\nДобавьте лекарства к курсу:',
+    added_toast: '✅ Добавлено',
+    create_error: '⚠️ Ошибка при создании курса.',
   },
 
   // ── Quick command (#94) ─────────────────────────────────────────

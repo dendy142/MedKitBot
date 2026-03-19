@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { TIMEZONES, DEFAULT_SETTINGS } from '../config.js';
 import { updateUserSettings, updateUserTimezone } from '../db/queries/users.js';
 import { supabase } from '../db/supabase.js';
+import { breadcrumb } from '../utils/format.js';
 
 /**
  * Show main settings menu
@@ -11,7 +12,9 @@ async function showSettings(ctx) {
   const tz = ctx.dbUser.timezone || 'Etc/GMT-3';
   const tzLabel = TIMEZONES.find(t => t.value === tz)?.label || tz;
 
-  let text = ctx.t('settings.title');
+  // #1 Breadcrumb: 🏠 › Настройки
+  const crumb = breadcrumb(ctx.t('common.breadcrumb_home'), ctx.t('settings.title').replace(/[*\n]/g, '').trim());
+  let text = `${crumb}\n\n` + ctx.t('settings.title');
   text += ctx.t('settings.tz_label', { value: tzLabel }) + '\n';
   text += ctx.t('settings.notif_reminders', { value: s.notifications?.intake_reminders ? '✅' : '❌' }) + '\n';
   text += ctx.t('settings.notif_expiry', { value: s.notifications?.expiry_alerts ? '✅' : '❌' }) + '\n';

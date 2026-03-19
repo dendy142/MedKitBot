@@ -7,6 +7,7 @@ import { logAction } from '../middleware/logging.js';
 import { withRetry } from '../utils/retry.js';
 import { supabase } from '../db/supabase.js';
 import { checkAchievements } from './achievements.js';
+import { showForWhomPicker } from './profiles.js';
 
 async function getState(userId) {
   const { data } = await supabase
@@ -292,9 +293,16 @@ export async function handleAddMedicineText(ctx) {
   if (step === 'notes') {
     // #69 Sanitize notes
     state.data.notes = sanitize(text, 500);
-    state.step = 'confirm';
+    // #47 "For whom?" step — show profile picker if user has profiles
+    state.step = 'for_whom';
     await setState(ctx.dbUser.id, state);
-    await sendConfirmation(ctx, state);
+    const shown = await showForWhomPicker(ctx, state);
+    if (!shown) {
+      // No profiles — skip to confirm
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    }
     return true;
   }
 
@@ -861,6 +869,31 @@ export async function handleAddMedicineCallback(ctx, action) {
     return true;
   }
 
+  // --- "For whom?" profile selection (#47) ---
+  if (action.startsWith('addmed:profile:')) {
+    const profileId = action.replace('addmed:profile:', '');
+    await ctx.answerCallbackQuery();
+    state.data.profileId = profileId === 'none' ? null : profileId;
+    state.step = 'confirm';
+    await setState(ctx.dbUser.id, state);
+    await sendConfirmation(ctx, state);
+    return true;
+  }
+
+  // #12 Edit from preview — go back to step 1 (name), preserving all data
+  if (action === 'addmed:edit') {
+    await ctx.answerCallbackQuery();
+    state.step = 'name';
+    await setState(ctx.dbUser.id, state);
+    await editBotMsg(ctx, state,
+      ctx.t('addmed.step1', { medkit: state.medkitName }),
+      new InlineKeyboard()
+        .text(ctx.t('addmed.btn_from_templates'), `addmed:templates:${state.medkitId}`).row()
+        .text(ctx.t('common.cancel'), 'addmed:cancel')
+    );
+    return true;
+  }
+
   // --- Confirm / Reject ---
   if (action === 'addmed:confirm') {
     await ctx.answerCallbackQuery();
@@ -902,7 +935,7 @@ export async function handleAddMedicineCallback(ctx, action) {
         {
           parse_mode: 'Markdown',
           reply_markup: new InlineKeyboard()
-            .text(ctx.t('medicine.btn_yes_schedule'), `sched:create:${medicine.id}`)
+            .text(ctx.t('medicine.btn_yes_schedule'), `sched:${medicine.id}:create`)
             .text(ctx.t('medicine.btn_no_schedule'), `addmed:sched_dismiss:${medicine.id}:${medkitId}`)
             .row()
             .text(ctx.t('addmed.btn_open'), `med:${medicine.id}`)
@@ -982,6 +1015,17 @@ async function advanceStep(ctx, state) {
     await setState(ctx.dbUser.id, state);
     await sendNotesPrompt(ctx, state);
   } else if (step === 'notes') {
+    // #47 "For whom?" step before confirm
+    state.step = 'for_whom';
+    await setState(ctx.dbUser.id, state);
+    const shown = await showForWhomPicker(ctx, state);
+    if (!shown) {
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    }
+  } else if (step === 'for_whom') {
+    // Skip profile selection — go to confirm
     state.step = 'confirm';
     await setState(ctx.dbUser.id, state);
     await sendConfirmation(ctx, state);
@@ -1080,6 +1124,13 @@ async function resendCurrentStep(ctx, state) {
     await sendPhotosPrompt(ctx, state);
   } else if (step === 'notes') {
     await sendNotesPrompt(ctx, state);
+  } else if (step === 'for_whom') {
+    const shown = await showForWhomPicker(ctx, state);
+    if (!shown) {
+      state.step = 'confirm';
+      await setState(ctx.dbUser.id, state);
+      await sendConfirmation(ctx, state);
+    }
   } else if (step === 'confirm') {
     await sendConfirmation(ctx, state);
   }
@@ -1241,6 +1292,7 @@ async function sendConfirmation(ctx, state) {
 
   const kb = new InlineKeyboard()
     .text(ctx.t('common.save'), 'addmed:confirm')
+    .text(ctx.t('addmed.btn_edit'), 'addmed:edit')
     .text(ctx.t('common.cancel'), 'addmed:reject');
   await editBotMsg(ctx, state, s, kb);
 }

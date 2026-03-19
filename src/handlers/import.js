@@ -5,6 +5,7 @@ import { createMedicine } from '../db/queries/medicines.js';
 import { createSchedule } from '../db/queries/schedules.js';
 import { parseDate } from '../utils/format.js';
 import { BOT_TOKEN } from '../config.js';
+import { log } from '../utils/logger.js';
 
 async function getState(userId) {
   const { data } = await supabase
@@ -314,17 +315,17 @@ async function executeJsonImport(ctx) {
               });
               createdSchedules++;
             } catch (e) {
-              console.error('Backup import schedule error:', e);
+              log('error', { action: 'backup_import_schedule', error: e.message });
               errors++;
             }
           }
         } catch (e) {
-          console.error('Backup import medicine error:', e);
+          log('error', { action: 'backup_import_medicine', error: e.message });
           errors++;
         }
       }
     } catch (e) {
-      console.error('Backup import medkit error:', e);
+      log('error', { action: 'backup_import_medkit', error: e.message });
       errors++;
     }
   }
@@ -387,7 +388,7 @@ export async function handlePhotoImportOffer(ctx) {
 export function registerImportHandlers(bot) {
   // Show import menu
   bot.callbackQuery('import', async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     await showImportMenu(ctx);
   });
 
@@ -477,7 +478,7 @@ export function registerImportHandlers(bot) {
       return;
     }
 
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
 
     const medkits = await getUserMedkits(ctx.dbUser.id);
     const medkit = medkits.find((m) => m.id === medkitId);
@@ -507,7 +508,7 @@ export function registerImportHandlers(bot) {
         });
         created++;
       } catch (err) {
-        console.error('Import medicine error:', err);
+        log('error', { action: 'import_medicine', error: err.message });
         errors++;
       }
     }

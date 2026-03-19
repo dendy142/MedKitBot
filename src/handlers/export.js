@@ -92,6 +92,8 @@ async function showExportMenu(ctx) {
   if (medkits.length > 1) {
     keyboard.text(ctx.t('export_import.export_all'), 'export:select:all').row();
   }
+  // #63 Export by profile
+  keyboard.text(ctx.t('profile.btn_export_by_profile'), 'export:by_profile').row();
   // Backup and schedule export
   keyboard.text(ctx.t('backup.btn_export'), 'backup:export').row();
   keyboard.text(ctx.t('schedule_export.btn_export'), 'export:schedules').row();
@@ -136,14 +138,12 @@ async function gatherMedicines(ctx, target) {
 async function handleCsvExport(ctx, target) {
   const result = await gatherMedicines(ctx, target);
   if (!result) {
-    await ctx.answerCallbackQuery(ctx.t('addmed.medkit_not_found'));
     return;
   }
 
   const { allMedicines, exportName } = result;
 
   if (allMedicines.length === 0) {
-    await ctx.answerCallbackQuery(ctx.t('export_import.export_no_medicines'));
     await ctx.editMessageText(ctx.t('export_import.export_empty'), {
       reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'export'),
     });
@@ -154,7 +154,6 @@ async function handleCsvExport(ctx, target) {
   const buffer = Buffer.from('\ufeff' + csvContent, 'utf-8');
   const inputFile = new InputFile(buffer, `${exportName}_${Date.now()}.csv`);
 
-  await ctx.answerCallbackQuery();
   await ctx.replyWithDocument(inputFile, {
     caption: ctx.t('export_import.export_done', { count: allMedicines.length }),
   });
@@ -167,14 +166,12 @@ async function handleCsvExport(ctx, target) {
 async function handlePdfExport(ctx, target) {
   const result = await gatherMedicines(ctx, target);
   if (!result) {
-    await ctx.answerCallbackQuery(ctx.t('addmed.medkit_not_found'));
     return;
   }
 
   const { allMedicines, exportName, medkitName } = result;
 
   if (allMedicines.length === 0) {
-    await ctx.answerCallbackQuery(ctx.t('export_import.export_no_medicines'));
     await ctx.editMessageText(ctx.t('export_import.export_empty'), {
       reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'export'),
     });
@@ -214,7 +211,6 @@ async function handlePdfExport(ctx, target) {
   const buffer = Buffer.from('\ufeff' + content, 'utf-8');
   const inputFile = new InputFile(buffer, `${exportName}_${Date.now()}.txt`);
 
-  await ctx.answerCallbackQuery();
   await ctx.replyWithDocument(inputFile, {
     caption: ctx.t('export_import.export_done', { count: allMedicines.length }),
   });
@@ -227,7 +223,6 @@ async function handleScheduleExport(ctx) {
   const schedules = await getUserActiveSchedules(ctx.dbUser.id);
 
   if (!schedules || schedules.length === 0) {
-    await ctx.answerCallbackQuery(ctx.t('schedule_export.empty'));
     return;
   }
 
@@ -264,7 +259,6 @@ async function handleScheduleExport(ctx) {
 
   text += ctx.t('schedule_export.footer');
 
-  await ctx.answerCallbackQuery();
   await ctx.reply(text);
 }
 
@@ -329,7 +323,6 @@ async function handleBackupExport(ctx) {
   const buffer = Buffer.from(json, 'utf-8');
   const inputFile = new InputFile(buffer, `medkit_backup_${Date.now()}.json`);
 
-  await ctx.answerCallbackQuery();
   await ctx.replyWithDocument(inputFile, {
     caption: ctx.t('backup.export_done'),
   });
@@ -353,28 +346,33 @@ export function registerExportHandlers(bot) {
 
   // CSV export
   bot.callbackQuery(/^export:csv:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     const target = ctx.match[1];
     await handleCsvExport(ctx, target);
   });
 
   // #97 PDF/TXT export
   bot.callbackQuery(/^export:pdf:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     const target = ctx.match[1];
     await handlePdfExport(ctx, target);
   });
 
   // #99 Schedule export
   bot.callbackQuery('export:schedules', async (ctx) => {
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     await handleScheduleExport(ctx);
   });
 
   // #100 Backup export
   bot.callbackQuery('backup:export', async (ctx) => {
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     await handleBackupExport(ctx);
   });
 
   // Legacy: direct export:ID still works (defaults to CSV)
   bot.callbackQuery(/^export:([0-9a-f-]+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     const target = ctx.match[1];
     await handleCsvExport(ctx, target);
   });

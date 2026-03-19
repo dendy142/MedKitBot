@@ -1,5 +1,6 @@
 import { webhookCallback } from 'grammy';
 import { createBot } from '../src/bot.js';
+import { log } from '../src/utils/logger.js';
 
 // Create bot instance (reused across invocations in same container)
 let bot;
@@ -18,7 +19,7 @@ export default async function handler(req, res) {
     const h = getHandler();
     await h(req, res);
   } catch (error) {
-    console.error('Webhook error:', error);
+    log('error', { action: 'webhook', error: error.message });
     res.status(200).json({ ok: true });
   }
 }

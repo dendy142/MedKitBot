@@ -333,7 +333,103 @@ export default async function handler(req, res) {
       }
     }
 
-    // Step 4: Handle snoozed logs — auto-skip if too many snoozes
+    // Step 4: #43 Adaptive reminders — check for consistently early intakes
+    try {
+      // Get all active schedules
+      const { data: allSchedules } = await supabase
+        .from('schedules')
+        .select('id, user_id, medicine_id, time_value')
+        .eq('status', 'active');
+
+      for (const sched of (allSchedules || [])) {
+        // Check if suggestion was sent in last 30 days
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+        const { count: recentSuggestion } = await supabase
+          .from('action_logs')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', sched.user_id)
+          .eq('action', 'adaptive_suggest')
+          .eq('entity_id', sched.id)
+          .gte('created_at', thirtyDaysAgo);
+
+        if (recentSuggestion > 0) continue;
+
+        // Get last 5 taken intake_logs for this schedule
+        const { data: recentTaken } = await supabase
+          .from('intake_logs')
+          .select('planned_at, confirmed_at')
+          .eq('schedule_id', sched.id)
+          .eq('status', 'taken')
+          .not('confirmed_at', 'is', null)
+          .order('planned_at', { ascending: false })
+          .limit(5);
+
+        if (!recentTaken || recentTaken.length < 3) continue;
+
+        // Check if user confirmed >5 minutes before planned for 3+ consecutive
+        let consecutiveEarly = 0;
+        let totalEarlyMinutes = 0;
+        for (const intake of recentTaken) {
+          const planned = new Date(intake.planned_at);
+          const confirmed = new Date(intake.confirmed_at);
+          const diffMs = planned.getTime() - confirmed.getTime();
+          const diffMin = diffMs / 60000;
+          if (diffMin > 5) {
+            consecutiveEarly++;
+            totalEarlyMinutes += diffMin;
+          } else {
+            break;
+          }
+        }
+
+        if (consecutiveEarly < 3) continue;
+
+        const avgEarlyMin = Math.round(totalEarlyMinutes / consecutiveEarly);
+
+        // Get user info
+        const { data: schedUser } = await supabase
+          .from('users')
+          .select('telegram_id, settings')
+          .eq('id', sched.user_id)
+          .single();
+
+        if (!schedUser) continue;
+
+        const { data: medData } = await supabase
+          .from('medicines')
+          .select('name')
+          .eq('id', sched.medicine_id)
+          .single();
+
+        const medName = medData?.name || '?';
+        const lang = schedUser.settings?.language || 'ru';
+
+        const keyboard = new InlineKeyboard()
+          .text(t('cron.btn_shift_yes', lang), `sched:shift:${sched.id}`)
+          .text(t('cron.btn_shift_no', lang), 'noop');
+
+        try {
+          await safeSend(bot, schedUser.telegram_id,
+            t('cron.adaptive_suggest', lang, { name: medName, minutes: avgEarlyMin }),
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+          );
+
+          await supabase.from('action_logs').insert({
+            user_id: sched.user_id,
+            action: 'adaptive_suggest',
+            entity_type: 'schedule',
+            entity_id: sched.id,
+            details: { avg_early_minutes: avgEarlyMin },
+          });
+        } catch (e) {
+          log('error', { cron: 'reminders', action: 'adaptive_suggest_send', scheduleId: sched.id, error: e.message });
+        }
+      }
+    } catch (e) {
+      log('error', { cron: 'reminders', action: 'adaptive_reminders', error: e.message });
+    }
+
+    // Step 5: Handle snoozed logs — auto-skip if too many snoozes
     const { data: snoozedLogs } = await supabase
       .from('intake_logs')
       .select('id, snooze_count')

@@ -4,6 +4,8 @@ import { BOT_TOKEN, CRON_SECRET } from '../../src/config.js';
 import { InlineKeyboard } from 'grammy';
 import { t } from '../../src/locales/index.js';
 import { pluralize } from '../../src/utils/format.js';
+import { log } from '../../src/utils/logger.js';
+import { safeSend } from '../../src/utils/retry.js';
 
 export default async function handler(req, res) {
   // Verify cron secret
@@ -127,20 +129,20 @@ export default async function handler(req, res) {
           .text(t('menu.btn_medkits', lang), 'medkits')
           .text(t('menu.btn_intake', lang), 'intake_today');
 
-        await bot.api.sendMessage(user.telegram_id, text, {
+        await safeSend(bot, user.telegram_id, text, {
           parse_mode: 'Markdown',
           reply_markup: keyboard,
         });
 
         sent++;
       } catch (e) {
-        console.error(`Failed to send weekly report to user ${user.id}:`, e.message);
+        log('error', { action: 'weekly_report_user', userId: user.id, error: e.message });
       }
     }
 
     return res.json({ ok: true, sent });
   } catch (error) {
-    console.error('Weekly report cron error:', error);
+    log('error', { action: 'weekly_report_cron', error: error.message });
     return res.status(500).json({ error: error.message });
   }
 }

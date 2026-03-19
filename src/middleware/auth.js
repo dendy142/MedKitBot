@@ -1,6 +1,7 @@
 import { supabase } from '../db/supabase.js';
 import { DEFAULT_SETTINGS } from '../config.js';
 import { createT } from '../locales/index.js';
+import { log } from '../utils/logger.js';
 
 const SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -36,7 +37,7 @@ export function authMiddleware() {
         .single();
 
       if (error) {
-        console.error('Error creating user:', error);
+        log('error', { action: 'create_user', error: error.message });
         return next();
       }
 

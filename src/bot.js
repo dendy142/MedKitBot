@@ -55,7 +55,7 @@ export function createBot() {
     { command: 'search', description: 'Поиск лекарства' },
     { command: 'help', description: 'Помощь' },
     { command: 'settings', description: 'Настройки' },
-  ]).catch(e => console.error('Failed to set bot commands:', e));
+  ]).catch(e => log('error', { action: 'set_bot_commands', error: e.message }));
 
   // #77 Commands clear active sessions before handling
   bot.command('start', async (ctx) => {

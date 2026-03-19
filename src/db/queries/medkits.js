@@ -1,4 +1,5 @@
 import { supabase } from '../supabase.js';
+import { log } from '../../utils/logger.js';
 
 /**
  * Create a new medkit and add owner as member
@@ -122,7 +123,7 @@ export async function deleteMedkit(medkitId) {
     if (error) throw error;
   } catch (err) {
     // Log but still try to clean up the medkit itself
-    console.error('Error during cascade delete of medkit:', medkitId, err?.message);
+    log('error', { action: 'cascade_delete_medkit', medkitId, error: err?.message });
     // Attempt final cleanup
     await supabase.from('medkit_members').delete().eq('medkit_id', medkitId);
     await supabase.from('medkits').delete().eq('id', medkitId);

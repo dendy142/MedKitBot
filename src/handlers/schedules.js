@@ -868,6 +868,59 @@ export function registerScheduleHandlers(bot) {
       });
     }
   });
+
+  // #43 Adaptive reminder — shift schedule time earlier
+  bot.callbackQuery(/^sched:shift:([0-9a-f-]+)$/, async (ctx) => {
+    const schedId = ctx.match[1];
+    await ctx.answerCallbackQuery();
+    try {
+      const sched = await getSchedule(schedId);
+      if (!sched || sched.time_mode !== 'exact') {
+        await ctx.editMessageText(ctx.t('common.error'), {
+          reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'main_menu'),
+        });
+        return;
+      }
+
+      // Compute average early minutes from action_logs
+      const { data: suggestLog } = await supabase
+        .from('action_logs')
+        .select('details')
+        .eq('action', 'adaptive_suggest')
+        .eq('entity_id', schedId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      const avgEarlyMin = suggestLog?.details?.avg_early_minutes || 10;
+
+      // Parse time_value and shift earlier
+      const [hours, minutes] = sched.time_value.split(':').map(Number);
+      let totalMin = hours * 60 + minutes - avgEarlyMin;
+      if (totalMin < 0) totalMin += 1440;
+      const newH = Math.floor(totalMin / 60) % 24;
+      const newM = totalMin % 60;
+      const newTime = `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
+
+      await supabase
+        .from('schedules')
+        .update({ time_value: newTime })
+        .eq('id', schedId);
+
+      const med = await getMedicine(sched.medicine_id);
+      await ctx.editMessageText(
+        ctx.t('common.updated') + `\n\n${med?.name || '?'}: ${sched.time_value} -> ${newTime}`,
+        {
+          reply_markup: new InlineKeyboard().text(ctx.t('common.main_menu'), 'main_menu'),
+        }
+      );
+    } catch (e) {
+      log('error', { action: 'shift_schedule', schedId, error: e.message });
+      await ctx.editMessageText(ctx.t('common.error'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'main_menu'),
+      });
+    }
+  });
 }
 
 /**

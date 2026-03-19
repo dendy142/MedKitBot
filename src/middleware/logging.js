@@ -1,4 +1,5 @@
 import { supabase } from '../db/supabase.js';
+import { log } from '../utils/logger.js';
 
 /**
  * Log an action to the action_logs table
@@ -13,7 +14,7 @@ export async function logAction(userId, action, entityType, entityId, details = 
       details,
     });
   } catch (error) {
-    console.error('Error logging action:', error);
+    log('error', { action: 'log_action', error: error.message });
   }
 }
 
@@ -30,6 +31,6 @@ export async function logMedicineChange(medicineId, userId, fieldName, oldValue,
       new_value: String(newValue ?? ''),
     });
   } catch (error) {
-    console.error('Error logging medicine change:', error);
+    log('error', { action: 'log_medicine_change', error: error.message });
   }
 }

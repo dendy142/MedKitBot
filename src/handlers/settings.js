@@ -20,6 +20,9 @@ async function showSettings(ctx) {
   text += ctx.t('settings.quiet_label', { value: s.quiet_hours?.enabled ? '✅' : '❌' }) + '\n';
   text += ctx.t('settings.weekly_label', { value: s.weeklyReport ? '✅' : '❌' }) + '\n';
   text += ctx.t('settings.auto_shop_label', { value: s.autoShoppingList ? '✅' : '❌' }) + '\n';
+  // #113 Notification style
+  const notifStyle = s.notifications?.notification_style || 'brief';
+  text += ctx.t('notif_style.title', { current: notifStyle === 'brief' ? ctx.t('notif_style.brief') : ctx.t('notif_style.detailed') }) + '\n';
 
   const keyboard = new InlineKeyboard()
     .text(ctx.t('settings.btn_timezone'), 'set:tz')
@@ -38,7 +41,11 @@ async function showSettings(ctx) {
     .row()
     .text(ctx.t('settings.btn_auto_shop'), 'set:auto_shop')
     .row()
+    .text(`🔔 ${ctx.t('settings.notif_style_title')} ${notifStyle === 'brief' ? ctx.t('notif_style.brief') : ctx.t('notif_style.detailed')}`, 'set:notif_style')
+    .row()
     .text(ctx.t('settings.btn_display'), 'set:display')
+    .row()
+    .text(ctx.t('settings.btn_profiles'), 'profiles')
     .row()
     .text(ctx.t('settings.btn_export'), 'export')
     .text(ctx.t('settings.btn_import'), 'import')
@@ -437,6 +444,19 @@ export function registerSettingsHandlers(bot) {
     ctx.dbUser.settings = s;
     await ctx.answerCallbackQuery(s.autoShoppingList ? ctx.t('settings.auto_shop_on_toast') : ctx.t('settings.auto_shop_off_toast'));
     await showAutoShopMenu(ctx);
+  });
+
+  // --- Notification Style (#113) ---
+  bot.callbackQuery('set:notif_style', async (ctx) => {
+    const s = { ...(ctx.dbUser.settings || DEFAULT_SETTINGS) };
+    s.notifications = { ...(s.notifications || DEFAULT_SETTINGS.notifications) };
+    const current = s.notifications.notification_style || 'brief';
+    const newStyle = current === 'brief' ? 'detailed' : 'brief';
+    s.notifications.notification_style = newStyle;
+    await updateUserSettings(ctx.dbUser.id, s);
+    ctx.dbUser.settings = s;
+    await ctx.answerCallbackQuery(ctx.t('notif_style.toast', { style: newStyle === 'brief' ? ctx.t('notif_style.brief') : ctx.t('notif_style.detailed') }));
+    await showSettings(ctx);
   });
 
   // --- Weekly Report (#45) ---

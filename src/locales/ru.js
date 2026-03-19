@@ -506,6 +506,7 @@ export default {
     btn_periods: '🌅 Периоды дня',
     btn_digest: '📊 Дайджест',
     btn_display: '📋 Отображение',
+    btn_profiles: '👤 Профили',
     btn_export: '📤 Экспорт',
     btn_import: '📥 Импорт',
     // Timezone
@@ -693,6 +694,22 @@ export default {
     invite_failed: '❌ Не удалось принять приглашение. Попробуйте позже.',
     invite_accepted: '✅ Вы присоединились к аптечке «{name}»!\n\nРоль: {role}',
     invite_owner_notif: '👥 {name} присоединился к аптечке «{medkit}»!',
+    // Pretty invite card (#85)
+    invite_card: '🧳 Присоединяйтесь к аптечке «{name}»!\n\n💊 {medCount} лекарств\n⏰ Напоминания о приёме\n📊 Статистика приверженности\n\nПерейдите по ссылке: {link}\n\nБот @my_med_kit_bot — домашняя аптечка в Telegram',
+    // Share medicine list (#86)
+    share_list_title: '💊 Аптечка «{name}»:\n',
+    share_list_item: '{n}. {med} — {qty}, годен до {expiry}\n',
+    share_list_footer: '\nСформировано в @my_med_kit_bot',
+    btn_share_list: '📤 Поделиться списком',
+    // Export for doctor (#88)
+    export_doctor_title: '📋 *Для врача*\n\n',
+    export_doctor_patient: 'Пациент: {name}\n',
+    export_doctor_age: 'Возраст: {age}\n',
+    export_doctor_meds: '\nТекущие лекарства:\n',
+    export_doctor_med_item: '{n}. {name}{dosage}{schedule}\n',
+    export_doctor_tags: '\nТеги: {tags}',
+    export_doctor_empty: 'Нет лекарств для экспорта.',
+    btn_doctor: '📋 Для врача',
   },
 
   // ── Statistics ───────────────────────────────────────────────────
@@ -792,6 +809,10 @@ export default {
     progress_no_photo: '❌ Фото не загружены',
     progress_schedule: '✅ Расписания созданы',
     progress_photo: '✅ Фото загружены',
+    progress_no_timezone: '❌ Часовой пояс не настроен',
+    progress_timezone: '✅ Часовой пояс настроен',
+    progress_no_profile: '❌ Профиль не заполнен',
+    progress_profile: '✅ Профиль заполнен',
     complete: '🎉 *Всё готово! Вот что вы можете делать:*\n\n📦 *Аптечки* — создавайте несколько аптечек (Домашняя, Дачная, В дорогу) и переключайтесь между ними\n\n💊 *Лекарства* — добавляйте с дозировкой, сроком годности, категорией, фото и заметками. Помечайте важные ⭐\n\n📆 *Приём* — настройте расписание, и бот будет напоминать вовремя\n\n👥 *Общий доступ* — поделитесь аптечкой с семьёй по ссылке\n\n🔍 *Поиск* — просто напишите название лекарства в чат\n\n⚙️ *Настройки* — часовой пояс, уведомления, дайджест\n\nНажмите кнопку ниже чтобы начать 👇',
   },
 
@@ -865,52 +886,127 @@ export default {
     photo_added: '📸 Первое фото лекарства',
     full_week: '📊 Неделя 100% приёмов',
     unlocked: '🎉 Новое достижение: {name}',
+    locked: '🔒 {name}',
+    empty: '🏆 У вас пока нет достижений.\n\nДобавляйте лекарства, соблюдайте приёмы и открывайте награды!',
     // Streak congrats (#91)
     streak_congrats_7: '🔥 {count} дней подряд! Так держать!',
     streak_congrats_30: '🎉 {count} дней без пропусков! Впечатляет!',
   },
 
-  // ── Profiles (#46-56) ────────────────────────────────────────────
+  // ── Profiles (#46-63) ────────────────────────────────────────────
   profile: {
+    // List
     title: '👤 *Профили*\n\n',
-    empty: 'У вас пока нет профилей.',
+    empty: 'У вас пока нет профилей.\n\nПрофили позволяют вести лекарства для каждого члена семьи отдельно.',
     btn_add: '➕ Добавить профиль',
-    // Create
-    create_name: '👤 *Новый профиль*\n\nВведите имя:',
-    create_birth_year: 'Введите год рождения (необязательно):',
-    create_icon: 'Выберите иконку:',
+    list_item: '{icon} {name}',
+    list_item_age: ' ({age} лет)',
+    // Create wizard
+    create_name: '👤 *Новый профиль*\n\nШаг 1: Введите *имя*:',
+    create_birth_year: '👤 *Новый профиль*\n\nШаг 2: Введите *год рождения* (необязательно):\n\n_Это нужно для автоматического расчёта возраста._',
+    create_icon: '👤 *Новый профиль*\n\nШаг 3: Выберите *иконку*:',
+    create_invalid_year: '⚠️ Введите корректный год (например, 1990 или 2020):',
+    created: '✅ Профиль *«{name}»* создан!',
+    created_toast: 'Профиль создан',
     // Card
-    card_name: '{icon} *{name}*',
-    card_age: 'Возраст: {age}',
-    card_tags: 'Теги: {tags}',
+    card_title: '{icon} *{name}*\n',
+    card_age: '📅 Возраст: {age} лет\n',
+    card_birth_year: '📅 Год рождения: {year}\n',
+    card_tags: '🏷 {tags}\n',
+    card_medicines_count: '💊 Лекарств: {count}\n',
+    card_schedules_count: '⏰ Активных курсов: {count}\n',
     // Edit
     btn_edit_name: '✏️ Имя',
     btn_edit_year: '🔢 Год рождения',
     btn_edit_icon: '😊 Иконка',
+    btn_edit_tags: '🏷 Теги',
     btn_delete: '🗑 Удалить',
+    btn_set_default: '⭐ По умолчанию',
+    btn_wellbeing: '📊 Самочувствие',
+    btn_to_profiles: '◀️ К профилям',
+    // Edit prompts
+    edit_name_prompt: '✏️ Введите новое имя профиля:',
+    edit_year_prompt: '🔢 Введите год рождения:',
+    edit_tags_prompt: '🏷 Введите теги через запятую:\n\n_Например: Аллергия на пенициллин, Хроническое: астма_',
+    name_updated: '✅ Имя обновлено.',
+    year_updated: '✅ Год рождения обновлён.',
+    icon_updated_toast: 'Иконка обновлена',
+    tags_updated: '✅ Теги обновлены.',
+    default_set_toast: 'Профиль по умолчанию установлен',
+    default_cleared_toast: 'Профиль по умолчанию сброшен',
+    is_default: '⭐ _Профиль по умолчанию_\n',
+    btn_clear_default: '⭐ Убрать по умолчанию',
     // Delete
-    delete_confirm: 'Удалить профиль «{name}»?\n\nЧто сделать с лекарствами?',
-    btn_transfer: 'Перенести в "Общие"',
-    btn_delete_all: 'Удалить всё',
-    // Filter
+    delete_confirm: '🗑 Удалить профиль *«{name}»*?\n\nЧто сделать с привязанными лекарствами ({count})?',
+    delete_confirm_empty: '🗑 Удалить профиль *«{name}»*?',
+    btn_transfer: '📦 Перенести в "Общие"',
+    btn_delete_all: '🗑 Удалить всё',
+    deleted_toast: 'Профиль удалён',
+    deleted: '✅ Профиль удалён.',
+    // Filter (#49)
     btn_filter: '👤 Фильтр',
-    filter_all: 'Все',
-    filter_general: 'Общие',
-    // For whom
-    for_whom: 'Для кого это лекарство?',
-    general: 'Общее',
+    filter_title: '👤 *Фильтр по профилю*\n\nВыберите профиль:',
+    filter_all: '👥 Все',
+    filter_general: '📦 Общие',
+    filter_active: '\n👤 Фильтр: {icon} {name}',
+    filter_active_general: '\n👤 Фильтр: Общие',
+    // For whom (addMedicine #47)
+    for_whom: '👤 *Для кого это лекарство?*',
+    for_whom_step: 'Шаг {step}: *Для кого?*',
+    general: '📦 Общее',
+    label_profile: '👤 {icon} {name}',
+    // Schedule (#48)
+    reminder_prefix: '👤 {icon} {name}: ',
+    // Stats (#50)
+    stats_title: '📊 *Статистика по профилю*\n\nВыберите профиль:',
+    stats_all: '📊 Все профили',
+    // Dashboard (#51)
+    dashboard_line: '{icon} {name}: {intakes_today} приёмов, ✅ {taken} принято',
+    dashboard_line_skip: ', ⚠️ {skipped} пропущено',
+    // Medicine notes (#61)
+    btn_add_note: '📝 Добавить заметку',
+    notes_title: '📝 *Заметки: {name}*\n\n',
+    notes_empty: '_Нет заметок._\n',
+    note_item: '📝 {date}: {text}\n',
+    note_prompt: '📝 Введите заметку:',
+    note_added: '✅ Заметка добавлена.',
+    note_added_toast: 'Заметка добавлена',
+    btn_to_notes: '📝 К заметкам',
+    // Export by profile (#63)
+    export_profile_title: '📤 *Экспорт по профилю*\n\nВыберите профиль:',
+    export_all_profiles: '📤 Все профили',
+    // Skip reason (#58)
+    skip_reason_title: '❌ *Причина пропуска:*',
+    skip_reason_forgot: '🤷 Забыл',
+    skip_reason_sick: '🤒 Плохое самочувствие',
+    skip_reason_empty: '📦 Закончилось',
+    skip_reason_doctor: '👨‍⚕️ Решение врача',
+    skip_reason_other: '✏️ Другое',
+    skip_reason_other_prompt: '✏️ Введите причину пропуска:',
+    skip_reason_saved_toast: 'Причина сохранена',
   },
 
   // ── Wellbeing (#59-60) ───────────────────────────────────────────
   wellbeing: {
-    prompt: 'Как самочувствие?',
+    prompt: '🫀 *Как самочувствие?*',
+    prompt_profile: '🫀 *Как самочувствие ({icon} {name})?*',
     good: '😊 Хорошо',
     ok: '😐 Нормально',
     bad: '😔 Плохо',
-    note_prompt: 'Добавьте заметку (необязательно):',
-    saved: 'Записано!',
-    calendar_title: '{month} {year}:',
-    summary: '{good} × {good_count}  {ok} × {ok_count}  {bad} × {bad_count}',
+    note_prompt: '📝 Добавьте заметку (необязательно):',
+    saved: '✅ Записано!',
+    saved_toast: 'Записано',
+    calendar_title: '📅 *{month} {year}*:\n\n',
+    calendar_row: '{days}\n',
+    summary: '\n😊 × {good_count}  😐 × {ok_count}  😔 × {bad_count}',
+    no_data: '_Нет данных за этот месяц._',
+    btn_prev_month: '◀️ {month}',
+    btn_next_month: '{month} ▶️',
+    btn_toggle_on: '🫀 Включить журнал',
+    btn_toggle_off: '🫀 Выключить журнал',
+    enabled_toast: 'Журнал самочувствия включён',
+    disabled_toast: 'Журнал самочувствия выключен',
+    settings_label: '🫀 Журнал самочувствия: {value}',
   },
 
   // ── Courses (#104) ───────────────────────────────────────────────
@@ -1058,6 +1154,31 @@ export default {
   // ── Date format (#114) ────────────────────────────────────────
   date_format: {
     label: '📅 Формат дат: {value}',
+  },
+
+  // ── Quick command (#94) ─────────────────────────────────────────
+  quick: {
+    no_medkit: '⚠️ Сначала создайте аптечку через /start',
+    usage: '💊 *Быстрое добавление*\n\nФормат: `/quick Название Дозировка Количество`\n\nПримеры:\n`/quick Ибупрофен 400мг 30`\n`/quick Витамин D`\n`/quick Парацетамол 500мг`',
+    added: '✅ Лекарство *«{name}»* добавлено!\n\n{details}',
+    detail_dosage: '💉 Дозировка: {value}',
+    detail_quantity: '📏 Количество: {value}',
+    detail_category: '🏷 Категория: {value}',
+    btn_open: '💊 Открыть',
+    btn_edit: '✏️ Дополнить',
+  },
+
+  // ── Quick start after onboarding (#82) ─────────────────────────
+  quick_start: {
+    prompt: '🚀 *Добавьте первое лекарство за 30 секунд!*\n\nВведите *название* лекарства:',
+    quantity_prompt: '📏 Введите *количество* (число):',
+    success: '✅ Лекарство *«{name}»* добавлено!\n\nДополнить данные можно позже через карточку лекарства.',
+  },
+
+  // ── Deep links (#93) ──────────────────────────────────────────
+  deep_link: {
+    medkit_not_found: '❌ Аптечка не найдена.',
+    medicine_not_found: '❌ Лекарство не найдено.',
   },
 
   // ── Format helpers (used by format.js) ───────────────────────────

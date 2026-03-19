@@ -3,12 +3,15 @@ import { supabase } from '../db/supabase.js';
 import { createMedkit, renameMedkit } from '../db/queries/medkits.js';
 import { getMedicine, updateMedicine } from '../db/queries/medicines.js';
 import { addToShoppingList } from '../db/queries/shoppingList.js';
-import { parseDate, formatQuantity } from '../utils/format.js';
+import { parseDate, formatQuantity, sanitize, validateQuantity, parseDateExtended } from '../utils/format.js';
 import { logAction, logMedicineChange } from '../middleware/logging.js';
 import { handleShareText } from './sharing.js';
 import { handleScheduleText } from './schedules.js';
 import { markIntakeTaken } from '../db/queries/intakeLogs.js';
 import { handleSettingsTextState } from './settings.js';
+import { handleQuickStartText } from './onboarding.js';
+import { handleProfileTextState } from './profiles.js';
+import { handleCourseTextState } from './courses.js';
 
 async function getState(userId) {
   const { data } = await supabase
@@ -51,12 +54,26 @@ export async function handleTextState(ctx) {
   await deleteUserMsg(ctx);
   const msgId = state.msgId;
 
+  // Quick start text inputs (#82)
+  if (state.action === 'quick_start_name' || state.action === 'quick_start_qty') {
+    return await handleQuickStartText(ctx, state);
+  }
+
   if (state.action === 'create_medkit') {
+    // #69 Sanitize medkit name
+    const sanitizedName = sanitize(text, 100);
+    if (!sanitizedName) {
+      await editBotMsg(ctx, msgId,
+        ctx.t('common.input_empty'),
+        new InlineKeyboard().text(ctx.t('common.cancel'), 'medkits')
+      );
+      return true;
+    }
     await clearState(ctx.dbUser.id);
-    const medkit = await createMedkit(text, ctx.dbUser.id);
-    await logAction(ctx.dbUser.id, 'create', 'medkit', medkit.id, { name: text });
+    const medkit = await createMedkit(sanitizedName, ctx.dbUser.id);
+    await logAction(ctx.dbUser.id, 'create', 'medkit', medkit.id, { name: sanitizedName });
     await editBotMsg(ctx, msgId,
-      ctx.t('medkit.created', { name: text }),
+      ctx.t('medkit.created', { name: sanitizedName }),
       new InlineKeyboard()
         .text(ctx.t('common.open'), `medkit:${medkit.id}`)
         .text(ctx.t('medkit.btn_to_medkits'), 'medkits')
@@ -65,11 +82,20 @@ export async function handleTextState(ctx) {
   }
 
   if (state.action === 'rename_medkit') {
+    // #69 Sanitize medkit name
+    const sanitizedName = sanitize(text, 100);
+    if (!sanitizedName) {
+      await editBotMsg(ctx, msgId,
+        ctx.t('common.input_empty'),
+        new InlineKeyboard().text(ctx.t('common.cancel'), `medkit:${state.medkitId}`)
+      );
+      return true;
+    }
     await clearState(ctx.dbUser.id);
-    await renameMedkit(state.medkitId, text);
-    await logAction(ctx.dbUser.id, 'rename', 'medkit', state.medkitId, { name: text });
+    await renameMedkit(state.medkitId, sanitizedName);
+    await logAction(ctx.dbUser.id, 'rename', 'medkit', state.medkitId, { name: sanitizedName });
     await editBotMsg(ctx, msgId,
-      ctx.t('medkit.renamed', { name: text }),
+      ctx.t('medkit.renamed', { name: sanitizedName }),
       new InlineKeyboard().text(ctx.t('medkit.btn_to_medkit'), `medkit:${state.medkitId}`)
     );
     return true;
@@ -77,11 +103,12 @@ export async function handleTextState(ctx) {
 
   if (state.action === 'restock') {
     await clearState(ctx.dbUser.id);
-    const num = parseFloat(text);
+    // #71 Quantity validation for restock
+    const num = validateQuantity(text);
     const med = await getMedicine(state.medId);
     if (!med) return true;
 
-    if (isNaN(num) || num <= 0) {
+    if (num === null) {
       await editBotMsg(ctx, msgId,
         ctx.t('medicine.restock_invalid'),
         new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}`)
@@ -128,10 +155,19 @@ export async function handleTextState(ctx) {
   }
 
   if (state.action === 'shop_add') {
+    // #69 Sanitize shopping item name
+    const sanitizedShopName = sanitize(text, 100);
+    if (!sanitizedShopName) {
+      await editBotMsg(ctx, msgId,
+        ctx.t('common.input_empty'),
+        new InlineKeyboard().text(ctx.t('common.cancel'), 'shopping')
+      );
+      return true;
+    }
     await clearState(ctx.dbUser.id);
-    await addToShoppingList(ctx.dbUser.id, text);
+    await addToShoppingList(ctx.dbUser.id, sanitizedShopName);
     await editBotMsg(ctx, msgId,
-      ctx.t('medicine.added_to_shop', { name: text }),
+      ctx.t('medicine.added_to_shop', { name: sanitizedShopName }),
       new InlineKeyboard()
         .text(ctx.t('common.add_more'), 'shop:add')
         .text(ctx.t('medicine.btn_to_shop'), 'shopping')
@@ -154,16 +190,42 @@ export async function handleTextState(ctx) {
     let updateData = {};
     let newValue = text;
 
-    if (field === 'name') updateData.name = text;
-    else if (field === 'dosage') updateData.dosage = text;
-    else if (field === 'category') updateData.category = text;
-    else if (field === 'notes') updateData.notes = text;
+    // #69 Sanitize text fields
+    if (field === 'name') {
+      const s = sanitize(text, 100);
+      if (!s) { await editBotMsg(ctx, msgId, ctx.t('common.input_empty'), new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:edit`)); return true; }
+      updateData.name = s; newValue = s;
+    }
+    else if (field === 'dosage') {
+      const s = sanitize(text, 100);
+      if (!s) { await editBotMsg(ctx, msgId, ctx.t('common.input_empty'), new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:edit`)); return true; }
+      updateData.dosage = s; newValue = s;
+    }
+    else if (field === 'category') {
+      const s = sanitize(text, 100);
+      if (!s) { await editBotMsg(ctx, msgId, ctx.t('common.input_empty'), new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:edit`)); return true; }
+      updateData.category = s; newValue = s;
+    }
+    else if (field === 'notes') {
+      const s = sanitize(text, 500);
+      if (!s) { await editBotMsg(ctx, msgId, ctx.t('common.input_empty'), new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:edit`)); return true; }
+      updateData.notes = s; newValue = s;
+    }
     else if (field === 'tags') {
-      updateData.tags = text.split(',').map(t => t.trim()).filter(t => t.length > 0);
+      updateData.tags = text.split(',').map(t => sanitize(t, 50)).filter(t => t !== null);
       newValue = updateData.tags;
     }
     else if (field === 'expiry') {
-      const parsed = parseDate(text);
+      // #70 Extended date parsing with multiple formats
+      const result = parseDateExtended(text);
+      if (!result) {
+        await editBotMsg(ctx, msgId,
+          ctx.t('addmed.invalid_date'),
+          new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:edit`)
+        );
+        return true;
+      }
+      const parsed = result.date;
       if (!parsed) {
         await editBotMsg(ctx, msgId,
           ctx.t('addmed.invalid_date'),
@@ -175,10 +237,11 @@ export async function handleTextState(ctx) {
       newValue = updateData.expiry_date;
     }
     else if (field === 'quantity') {
-      const num = parseFloat(text);
-      if (isNaN(num) || num < 0) {
+      // #71 Quantity validation
+      const num = validateQuantity(text);
+      if (num === null) {
         await editBotMsg(ctx, msgId,
-          ctx.t('medicine.restock_invalid'),
+          ctx.t('addmed.quantity_invalid'),
           new InlineKeyboard().text(ctx.t('common.back'), `med:${state.medId}:edit`)
         );
         return true;
@@ -297,6 +360,23 @@ export async function handleTextState(ctx) {
     const result = await handleSettingsTextState(state, text, ctx);
     if (result === 'keep_state') {
       // Don't clear state — user needs to retry
+      return true;
+    }
+    if (result === 'handled') {
+      await clearState(ctx.dbUser.id);
+      return true;
+    }
+  }
+
+  // Profile text states (create profile, edit profile name/year/tags, medicine notes, wellbeing notes, skip reason)
+  const profileActions = [
+    'create_profile', 'edit_profile_name', 'edit_profile_year',
+    'edit_profile_tags', 'add_medicine_note', 'wellbeing_note',
+    'skip_reason_other',
+  ];
+  if (profileActions.includes(state.action)) {
+    const result = await handleProfileTextState(state, text, ctx);
+    if (result === 'keep_state') {
       return true;
     }
     if (result === 'handled') {

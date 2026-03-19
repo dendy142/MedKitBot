@@ -44,24 +44,26 @@ export function authMiddleware() {
       user = newUser;
       ctx.isNewUser = true;
     } else {
-      // Check if user completed onboarding (has at least one medkit)
-      const { count } = await supabase
-        .from('medkit_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id);
-      ctx.isNewUser = count === 0;
-
-      // Update username/first_name if changed + always update last_active_at (#89)
+      // Run independent queries in parallel for performance
       const updates = { last_active_at: new Date().toISOString() };
       if (user.username !== ctx.from.username) updates.username = ctx.from.username || null;
       if (user.first_name !== ctx.from.first_name) updates.first_name = ctx.from.first_name || null;
-      await supabase
-        .from('users')
-        .update(updates)
-        .eq('id', user.id);
 
-      // #66 Session timeout — check and clean expired sessions
-      await cleanExpiredSessions(user.id);
+      const [memberResult] = await Promise.all([
+        // Check if user completed onboarding (has at least one medkit)
+        supabase
+          .from('medkit_members')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id),
+        // Update username/first_name/last_active_at (#89)
+        supabase
+          .from('users')
+          .update(updates)
+          .eq('id', user.id),
+        // #66 Session timeout — check and clean expired sessions
+        cleanExpiredSessions(user.id),
+      ]);
+      ctx.isNewUser = memberResult.count === 0;
     }
 
     ctx.dbUser = user;

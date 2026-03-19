@@ -44,16 +44,26 @@ async function showMedkitList(ctx, page = 0) {
   thresholdDate.setDate(thresholdDate.getDate() + thresholdDays);
   const thresholdStr = thresholdDate.toISOString().split('T')[0];
 
-  for (const mk of pageItems) {
-    const { data: meds } = await supabase
-      .from('medicines')
-      .select('id, expiry_date, quantity, initial_quantity')
-      .eq('medkit_id', mk.id)
-      .eq('is_archived', false);
+  // Batch query: fetch all medicines for visible medkits in one DB call
+  const medkitIds = pageItems.map(mk => mk.id);
+  const { data: allMeds } = await supabase
+    .from('medicines')
+    .select('id, medkit_id, expiry_date, quantity, initial_quantity')
+    .in('medkit_id', medkitIds)
+    .eq('is_archived', false);
 
-    const medCount = (meds || []).length;
+  // Group medicines by medkit_id
+  const medsByMedkit = {};
+  for (const m of (allMeds || [])) {
+    if (!medsByMedkit[m.medkit_id]) medsByMedkit[m.medkit_id] = [];
+    medsByMedkit[m.medkit_id].push(m);
+  }
+
+  for (const mk of pageItems) {
+    const meds = medsByMedkit[mk.id] || [];
+    const medCount = meds.length;
     let problemCount = 0;
-    for (const m of (meds || [])) {
+    for (const m of meds) {
       if (m.expiry_date && m.expiry_date <= thresholdStr) {
         problemCount++;
       } else if (m.quantity <= lowStockCount) {

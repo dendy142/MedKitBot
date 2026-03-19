@@ -46,6 +46,24 @@ export function createBot() {
   // Auth middleware — ensures user in DB, attaches ctx.dbUser
   bot.use(authMiddleware());
 
+  // Auto-answer unanswered callback queries & handle "message is not modified" errors
+  bot.on('callback_query:data', async (ctx, next) => {
+    try {
+      await next();
+    } catch (e) {
+      // Silently handle "message is not modified" errors (user clicked same button again)
+      if (e?.description?.includes('message is not modified')) {
+        try { await ctx.answerCallbackQuery(); } catch {}
+        return;
+      }
+      // Ensure callback query is answered even on error (prevents button spinning)
+      try { await ctx.answerCallbackQuery(); } catch {}
+      throw e;
+    }
+    // Auto-answer if handler didn't answer (prevents button spinning on slow handlers)
+    try { await ctx.answerCallbackQuery(); } catch {}
+  });
+
   // #95 Set bot commands on startup
   bot.api.setMyCommands([
     { command: 'start', description: 'Главное меню' },

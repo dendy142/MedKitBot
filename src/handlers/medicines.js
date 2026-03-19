@@ -41,8 +41,17 @@ async function showMedicineCard(ctx, medicineId) {
   }
   if (med.is_favorite) badges += '⭐';
 
+  // Fetch medkit and schedules in parallel for performance
+  const [medkit, { data: schedules }] = await Promise.all([
+    getMedkit(med.medkit_id, ctx.dbUser.id),
+    supabase
+      .from('schedules')
+      .select('*')
+      .eq('medicine_id', medicineId)
+      .eq('status', 'active'),
+  ]);
+
   // #1 Breadcrumb: 🏠 › Medkit Name › Medicine Name
-  const medkit = await getMedkit(med.medkit_id, ctx.dbUser.id);
   const crumb = breadcrumb(ctx.t('common.breadcrumb_home'), medkit?.name, med.name);
   let text = `${crumb}\n\n💊 *${med.name}*${med.dosage ? ' ' + med.dosage : ''}${badges ? ' ' + badges : ''}\n`;
 
@@ -66,12 +75,7 @@ async function showMedicineCard(ctx, medicineId) {
 
   if (med.notes) text += `${ctx.t('medicine.label_notes', { value: med.notes })}\n`;
 
-  // #19 Linked schedules
-  const { data: schedules } = await supabase
-    .from('schedules')
-    .select('*')
-    .eq('medicine_id', medicineId)
-    .eq('status', 'active');
+  // #19 Linked schedules (already fetched above)
   if (schedules && schedules.length > 0) {
     text += `\n${ctx.t('medicine.label_schedules')}\n`;
     for (const s of schedules) {

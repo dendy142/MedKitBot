@@ -231,60 +231,71 @@ export default async function handler(req, res) {
       logsByUser[uid].push(log);
     }
 
-    for (const [userId, logs] of Object.entries(logsByUser)) {
-      const firstLog = logs[0];
+    for (const [userId, userLogs] of Object.entries(logsByUser)) {
+      const firstLog = userLogs[0];
       const userSettings = firstLog.users?.settings || {};
       const lang = userSettings.language || 'ru';
       const telegramId = firstLog.users.telegram_id;
 
-      try {
-        if (logs.length >= 2) {
-          // Grouped notification (#44)
-          let text = t('cron.reminder_grouped', lang);
-          const logIds = [];
-          for (const log of logs) {
+      // #44 Group by planned_at time (same minute) within each user
+      const logsByTime = {};
+      for (const log of userLogs) {
+        const planned = new Date(log.planned_at);
+        const timeKey = `${String(planned.getUTCHours()).padStart(2, '0')}:${String(planned.getUTCMinutes()).padStart(2, '0')}`;
+        if (!logsByTime[timeKey]) logsByTime[timeKey] = [];
+        logsByTime[timeKey].push(log);
+      }
+
+      for (const [timeKey, logs] of Object.entries(logsByTime)) {
+        try {
+          if (logs.length >= 2) {
+            // Grouped notification (#44)
+            let text = t('cron.reminder_grouped', lang);
+            const logIds = [];
+            for (const log of logs) {
+              const medName = log.medicines?.name || t('cron.reminder_medicine', lang);
+              const dose = log.schedules?.dose_per_intake || 1;
+              const unit = '';
+              text += t('cron.reminder_grouped_item', lang, { name: `${medName}${log.medicines?.dosage ? ' ' + log.medicines.dosage : ''}`, dose, unit });
+              logIds.push(log.id);
+            }
+
+            const keyboard = new InlineKeyboard()
+              .text(t('cron.btn_take_all', lang), `intake:batch_take:${logIds.join(',')}`)
+              .text(t('cron.btn_details', lang), 'intake_today');
+
+            await bot.api.sendMessage(telegramId, text, {
+              parse_mode: 'Markdown',
+              reply_markup: keyboard,
+            });
+            reminderCount += logs.length;
+          } else {
+            // Single notification (original behavior)
+            const log = logs[0];
             const medName = log.medicines?.name || t('cron.reminder_medicine', lang);
             const dose = log.schedules?.dose_per_intake || 1;
-            const unit = '';
-            text += t('cron.reminder_grouped_item', lang, { name: `${medName}${log.medicines?.dosage ? ' ' + log.medicines.dosage : ''}`, dose, unit });
-            logIds.push(log.id);
+            const medNotes = log.medicines?.notes;
+
+            let text = t('cron.reminder_title', lang);
+            text += `${medName}${log.medicines?.dosage ? ' ' + log.medicines.dosage : ''}\n`;
+            text += t('cron.reminder_dose', lang, { dose, unit: '' }) + '\n';
+
+            if (medNotes) text += t('cron.reminder_notes', lang, { notes: medNotes }) + '\n';
+
+            const keyboard = new InlineKeyboard()
+              .text(t('cron.btn_take', lang), `intake:${log.id}:take_remind`)
+              .text(t('cron.btn_snooze', lang), `intake:${log.id}:snooze`)
+              .text(t('cron.btn_skip', lang), `intake:${log.id}:skip_remind`);
+
+            await bot.api.sendMessage(telegramId, text, {
+              parse_mode: 'Markdown',
+              reply_markup: keyboard,
+            });
+            reminderCount++;
           }
-
-          const keyboard = new InlineKeyboard()
-            .text(t('cron.btn_take_all', lang), `intake:batch_take:${logIds.join(',')}`)
-            .text(t('cron.btn_details', lang), 'intake_today');
-
-          await bot.api.sendMessage(telegramId, text, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-          });
-          reminderCount += logs.length;
-        } else {
-          // Single notification (original behavior)
-          const log = logs[0];
-          const medName = log.medicines?.name || t('cron.reminder_medicine', lang);
-          const dose = log.schedules?.dose_per_intake || 1;
-          const medNotes = log.medicines?.notes;
-
-          let text = t('cron.reminder_title', lang);
-          text += `${medName}${log.medicines?.dosage ? ' ' + log.medicines.dosage : ''}\n`;
-          text += t('cron.reminder_dose', lang, { dose, unit: '' }) + '\n';
-
-          if (medNotes) text += t('cron.reminder_notes', lang, { notes: medNotes }) + '\n';
-
-          const keyboard = new InlineKeyboard()
-            .text(t('cron.btn_take', lang), `intake:${log.id}:take_remind`)
-            .text(t('cron.btn_snooze', lang), `intake:${log.id}:snooze`)
-            .text(t('cron.btn_skip', lang), `intake:${log.id}:skip_remind`);
-
-          await bot.api.sendMessage(telegramId, text, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-          });
-          reminderCount++;
+        } catch (e) {
+          console.error(`Failed to send reminder to user ${userId}:`, e.message);
         }
-      } catch (e) {
-        console.error(`Failed to send reminder to user ${userId}:`, e.message);
       }
     }
 

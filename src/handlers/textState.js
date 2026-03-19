@@ -190,6 +190,28 @@ export async function handleTextState(ctx) {
     await updateMedicine(state.medId, updateData);
     await logMedicineChange(state.medId, ctx.dbUser.id, field, med[field], newValue);
 
+    // #28 Auto-add to shopping list when quantity is edited to low stock
+    if (field === 'quantity') {
+      const settings = ctx.dbUser?.settings || {};
+      if (settings.autoShoppingList) {
+        const thresholds = settings.thresholds || {};
+        const lowCount = thresholds.low_stock_count || 5;
+        const lowPercent = thresholds.low_stock_percent || 20;
+        const isLow = updateData.quantity <= lowCount || (med.initial_quantity > 0 && (updateData.quantity / med.initial_quantity) * 100 <= lowPercent);
+        if (isLow) {
+          const { data: existing } = await supabase
+            .from('shopping_list')
+            .select('id')
+            .eq('medicine_id', state.medId)
+            .eq('is_bought', false)
+            .limit(1);
+          if (!existing || existing.length === 0) {
+            await addToShoppingList(ctx.dbUser.id, med.name, med.id, med.medkit_id);
+          }
+        }
+      }
+    }
+
     // #40 Auto-pause active schedules when quantity is edited to zero
     if (field === 'quantity' && updateData.quantity <= 0) {
       const { data: activeScheds } = await supabase

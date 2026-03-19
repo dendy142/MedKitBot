@@ -15,7 +15,16 @@ export default {
     done: '✅ Готово',
     loading: '⏳ Загружаю...',
     error: '⚠️ Произошла ошибка. Попробуйте ещё раз или вернитесь в /menu',
+    error_generic_msg: '⚠️ Произошла ошибка. Попробуйте ещё раз или вернитесь в /menu',
     data_outdated: '⚠️ Данные устарели. Вернитесь в /menu',
+    stale_data: '⚠️ Данные устарели. Вернитесь в /menu',
+    session_expired: '⏰ Ваш предыдущий ввод устарел. Начнём заново?',
+    session_expired_btn: '🔄 Начать заново',
+    insufficient_rights: '🔒 Недостаточно прав',
+    already_taken: 'Уже отмечено ✅',
+    already_deleted: 'Уже удалено',
+    input_too_long: '⚠️ Слишком длинный текст (максимум {max} символов).',
+    input_empty: '⚠️ Пустой ввод. Попробуйте ещё раз.',
     not_found: 'Не найдено',
     main_menu: '🏠 Главное меню',
     to_medkits: '📦 Мои аптечки',
@@ -47,6 +56,7 @@ export default {
     btn_settings: '⚙️ Настройки',
     btn_intake_today: '⏰ Приёмы сегодня',
     btn_add_medicine: '➕ Добавить лекарство',
+    btn_achievements: '🏆 Достижения',
     // Empty states
     empty_medkits: 'У вас пока нет аптечек.',
     empty_intakes: 'Нет запланированных приёмов.',
@@ -54,7 +64,7 @@ export default {
     attention: '⚠️ Требует внимания:',
     attention_expired: '🔴 {count} просрочено',
     attention_expiring: '🟡 {count} скоро истекут',
-    btn_attention: 'Посмотреть',
+    btn_attention: '⚠️ Посмотреть',
   },
 
   // ── Medkits ──────────────────────────────────────────────────────
@@ -272,6 +282,10 @@ export default {
     invalid_date: 'Введите дату в формате ДД.ММ.ГГГГ, например 15.03.2027',
     invalid_number: 'Введите число, например 30 или 0.5',
     invalid_name: 'Введите название лекарства (до 100 символов)',
+    // Validation (#70 date)
+    date_too_far: '⚠️ Дата не может быть дальше 10 лет в будущем.',
+    // Validation (#71 quantity)
+    quantity_invalid: '⚠️ Введите положительное число (макс. 99999, до 1 знака после запятой).',
     // Auto-category (#33)
     auto_category: 'Подсказка: категория «{category}» подобрана автоматически.',
     // Hint from history (#31)
@@ -921,6 +935,129 @@ export default {
     import_errors: '\n⚠️ Ошибок: {count}',
     import_invalid: '⚠️ Файл не является корректным бэкапом. Убедитесь, что это JSON-файл, экспортированный из бота.',
     import_send_json: '📥 *Восстановление из бэкапа*\n\nОтправьте JSON-файл, экспортированный из бота.',
+  },
+
+  // ── PDF export (#97) ───────────────────────────────────────────
+  pdf: {
+    btn_export_pdf: '📄 PDF',
+    header: 'Аптечка: {name}',
+    col_name: 'Название',
+    col_dosage: 'Дозировка',
+    col_category: 'Категория',
+    col_expiry: 'Годен до',
+    col_quantity: 'Кол-во',
+    footer: 'Сгенерировано {date} — @my_med_kit_bot',
+    no_data: '—',
+  },
+
+  // ── Photo import (#98) ────────────────────────────────────────
+  photo_import: {
+    offer: '📷 Вы отправили фото.\n\nНачать добавление лекарства с этим фото?',
+    btn_yes: '💊 Да, добавить',
+    btn_no: '❌ Нет',
+  },
+
+  // ── Schedule export (#99) ─────────────────────────────────────
+  schedule_export: {
+    btn_export: '📤 Экспорт расписания',
+    title: '📅 Мои расписания:\n\n',
+    time_group: '{period} ({time}):\n',
+    item: '  💊 {name} {dosage} — {dose} {unit}\n',
+    empty: 'Нет активных расписаний для экспорта.',
+    footer: '\nСформировано в @my_med_kit_bot',
+  },
+
+  // ── Calendar (#101) ───────────────────────────────────────────
+  calendar: {
+    title: '📅 *{month} {year}*\n\n',
+    header: 'Пн Вт Ср Чт Пт Сб Вс',
+    legend: '\n✅ все ❌ пропуски ⏳ ожидает',
+    btn_calendar: '📅 Календарь',
+    btn_prev: '◀️ {month}',
+    btn_next: '{month} ▶️',
+    no_data: '📅 *{month} {year}*\n\nНет данных о приёмах за этот месяц.',
+  },
+
+  // ── Tomorrow/Yesterday (#102-103) ─────────────────────────────
+  tomorrow: {
+    title: '📅 *Приёмы на завтра*\n\n',
+    empty: '📅 *Приёмы на завтра*\n\nНет запланированных приёмов.',
+    read_only: '\n_Предварительный просмотр — отметить можно только сегодня._',
+  },
+  yesterday: {
+    title: '📅 *Приёмы за вчера*\n\n',
+    empty: '📅 *Приёмы за вчера*\n\nНе было запланированных приёмов.',
+    mark_taken: '✅ Отметить',
+    marked_toast: 'Отмечено как принятое',
+  },
+
+  // ── Shopping categories (#105) ────────────────────────────────
+  shopping_cat: {
+    from_medkit: '💊 Из аптечки:',
+    manual: '📝 Вручную:',
+  },
+
+  // ── Shopping quantity (#106) ──────────────────────────────────
+  shopping_qty: {
+    display: '{name} × {qty} уп.',
+    prompt: '📦 *{name}*\n\nСколько упаковок?',
+  },
+
+  // ── Recurring purchases (#107) ────────────────────────────────
+  recurring: {
+    suggest: '💡 {name} часто заканчивается. Включить автодобавление в покупки?',
+    btn_enable: '🔔 Включить',
+    btn_dismiss: 'Нет',
+    enabled_toast: 'Автодобавление включено',
+  },
+
+  // ── Bought with restock (#108) ────────────────────────────────
+  bought_restock: {
+    prompt: '✅ *{name}* — куплено!\n\nПополнить остаток в аптечке?',
+    btn_restock_10: '+10',
+    btn_restock_20: '+20',
+    btn_restock_30: '+30',
+    btn_restock_custom: 'Ввести число',
+    btn_no: 'Нет',
+    done: '✅ Остаток пополнен на {qty}.',
+  },
+
+  // ── Search by category (#109) ─────────────────────────────────
+  search_category: {
+    title: '🔍 *Поиск по категории*\n\nВыберите категорию:',
+    results: '🔍 *Категория: {category}*\n\n',
+    empty: '🔍 Нет лекарств в категории «{category}».',
+  },
+
+  // ── Search by expiry (#110) ───────────────────────────────────
+  search_expiry: {
+    title: '🔍 *Поиск по сроку годности*\n\nВыберите период:',
+    btn_this_month: '📅 В этом месяце',
+    btn_next_month: '📅 В следующем',
+    results: '🔍 *Истекает: {period}*\n\n',
+    empty: '🔍 Нет лекарств с истекающим сроком в этот период.',
+  },
+
+  // ── Search by status (#111) ───────────────────────────────────
+  search_status: {
+    title: '🔍 *Быстрые фильтры*\n\nВыберите статус:',
+    results: '🔍 *{status}*\n\n',
+    empty: '🔍 Нет лекарств по этому фильтру.',
+  },
+
+  // ── Notification style (#113) ─────────────────────────────────
+  notif_style: {
+    title: '🔔 *Стиль уведомлений*\n\nТекущий: *{current}*',
+    brief: 'Краткие',
+    detailed: 'Подробные',
+    btn_brief: '📝 Краткие',
+    btn_detailed: '📋 Подробные',
+    toast: 'Стиль уведомлений: {style}',
+  },
+
+  // ── Date format (#114) ────────────────────────────────────────
+  date_format: {
+    label: '📅 Формат дат: {value}',
   },
 
   // ── Format helpers (used by format.js) ───────────────────────────

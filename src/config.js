@@ -38,6 +38,8 @@ export const DEFAULT_SETTINGS = {
   },
   autoShoppingList: false,
   weeklyReport: false,
+  showTips: true,
+  inactivityReminder: true,
   display: {
     default_sort: 'name',
     date_format: 'DD.MM.YYYY',
@@ -187,6 +189,23 @@ export const CATEGORY_KEYWORDS = {
     'вольтарен', 'фастум', 'троксевазин',
   ],
 };
+
+// Achievement definitions (#90)
+export const ACHIEVEMENTS = {
+  first_medicine: { key: 'first_medicine' },
+  streak_7: { key: 'streak_7' },
+  streak_30: { key: 'streak_30' },
+  medicines_10: { key: 'medicines_10' },
+  shared_medkit: { key: 'shared_medkit' },
+  month_with_bot: { key: 'month_with_bot' },
+  all_taken_day: { key: 'all_taken_day' },
+  first_profile: { key: 'first_profile' },
+  photo_added: { key: 'photo_added' },
+  full_week: { key: 'full_week' },
+};
+
+// Feature tips (#83) — tip keys for first 7 days
+export const TIPS = ['tip_1', 'tip_2', 'tip_3', 'tip_4', 'tip_5', 'tip_6', 'tip_7'];
 
 // Pagination
 export const PAGE_SIZE = 8;

@@ -16,8 +16,10 @@ import { registerIntakeHandlers } from './handlers/intake.js';
 import { registerScheduleHandlers } from './handlers/schedules.js';
 import { registerSharingHandlers } from './handlers/sharing.js';
 import { registerExportHandlers } from './handlers/export.js';
-import { registerImportHandlers, handleImportDocument } from './handlers/import.js';
+import { registerImportHandlers, handleImportDocument, handlePhotoImportOffer } from './handlers/import.js';
 import { registerStatsHandlers } from './handlers/stats.js';
+import { registerCourseHandlers } from './handlers/courses.js';
+import { registerSearchHandlers } from './handlers/search.js';
 import { registerAchievementHandlers, checkAchievements } from './handlers/achievements.js';
 import { clearUserSessions } from './utils/sessions.js';
 import { log } from './utils/logger.js';
@@ -260,15 +262,11 @@ export function createBot() {
   registerImportHandlers(bot);
   registerShoppingHandlers(bot);
   registerStatsHandlers(bot);
+  registerCourseHandlers(bot);
 
   // Search
   bot.callbackQuery('search', handleSearchCallback);
-
-  // Search by status (from attention banner #92)
-  bot.callbackQuery(/^search:status:(.+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await handleSearchCallback(ctx);
-  });
+  registerSearchHandlers(bot);
 
   // Document handler (for CSV import)
   bot.on('message:document', async (ctx) => {
@@ -276,9 +274,12 @@ export function createBot() {
     if (!handled) await ctx.answerCallbackQuery?.();
   });
 
-  // Photo handler (for add medicine)
+  // Photo handler (for add medicine, then #98 photo import offer)
   bot.on('message:photo', async (ctx) => {
-    await handleAddMedicinePhoto(ctx);
+    const handled = await handleAddMedicinePhoto(ctx);
+    if (!handled) {
+      await handlePhotoImportOffer(ctx);
+    }
   });
 
   // Text handler: check active states, then fallback to search

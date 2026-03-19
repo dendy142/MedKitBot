@@ -19,6 +19,8 @@ export function formatDate(date, format = 'DD.MM.YYYY') {
       return `${month}.${year}`;
     case 'DD мес. YYYY':
       return `${day} ${months[d.getMonth()]} ${year}`;
+    case 'YYYY-MM-DD':
+      return `${year}-${month}-${day}`;
     case 'DD.MM.YYYY':
     default:
       return `${day}.${month}.${year}`;
@@ -141,6 +143,105 @@ export function progressBar(current, total, width = 10) {
   const empty = width - filled;
   const percent = Math.round(ratio * 100);
   return '█'.repeat(filled) + '░'.repeat(empty) + ` ${percent}%`;
+}
+
+/**
+ * #69 Sanitize user text input.
+ * Trims, removes control chars (except \n), enforces maxLen, returns null if empty.
+ *
+ * @param {string} text
+ * @param {number} maxLen
+ * @returns {string|null}
+ */
+export function sanitize(text, maxLen = 500) {
+  if (!text || typeof text !== 'string') return null;
+  // Remove control chars except \n (U+000A)
+  let s = text.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  s = s.trim();
+  if (s.length === 0) return null;
+  if (s.length > maxLen) s = s.slice(0, maxLen);
+  return s;
+}
+
+/**
+ * #71 Validate quantity input.
+ * Accepts comma as decimal separator, positive numbers only, max 99999, max 1 decimal place.
+ * Returns parsed number or null if invalid.
+ *
+ * @param {string} text
+ * @returns {number|null}
+ */
+export function validateQuantity(text) {
+  if (!text || typeof text !== 'string') return null;
+  const normalized = text.trim().replace(',', '.');
+  const num = parseFloat(normalized);
+  if (isNaN(num) || num <= 0 || num > 99999) return null;
+  // Max 1 decimal place
+  const parts = normalized.split('.');
+  if (parts.length === 2 && parts[1].length > 1) return null;
+  return num;
+}
+
+/**
+ * #70 Parse date from user input with multiple format support.
+ * Supports: DD.MM.YYYY, DD/MM/YYYY, YYYY-MM-DD, MM.YYYY
+ * Returns { date: Date, warn: boolean } or null if invalid.
+ * warn=true when date is >5 years in future.
+ * Returns null when date is >10 years in future.
+ */
+export function parseDateExtended(input) {
+  if (!input) return null;
+  const trimmed = input.trim();
+
+  let d = null;
+
+  // DD.MM.YYYY
+  const dotFull = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (dotFull) {
+    const [, day, month, year] = dotFull;
+    d = new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
+  // DD/MM/YYYY
+  if (!d) {
+    const slashFull = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slashFull) {
+      const [, day, month, year] = slashFull;
+      d = new Date(Number(year), Number(month) - 1, Number(day));
+    }
+  }
+
+  // YYYY-MM-DD
+  if (!d) {
+    const iso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (iso) {
+      const [, year, month, day] = iso;
+      d = new Date(Number(year), Number(month) - 1, Number(day));
+    }
+  }
+
+  // MM.YYYY (last day of month)
+  if (!d) {
+    const shortDot = trimmed.match(/^(\d{1,2})\.(\d{4})$/);
+    if (shortDot) {
+      const [, month, year] = shortDot;
+      d = new Date(Number(year), Number(month), 0);
+    }
+  }
+
+  if (!d || isNaN(d.getTime())) return null;
+
+  // #70 max 10 years in future
+  const tenYears = new Date();
+  tenYears.setFullYear(tenYears.getFullYear() + 10);
+  if (d > tenYears) return null;
+
+  // #70 warn if >5 years
+  const fiveYears = new Date();
+  fiveYears.setFullYear(fiveYears.getFullYear() + 5);
+  const warn = d > fiveYears;
+
+  return { date: d, warn };
 }
 
 /**

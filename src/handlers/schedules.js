@@ -5,6 +5,7 @@ import { supabase } from '../db/supabase.js';
 import { formatQuantity } from '../utils/format.js';
 import { ensureExists } from '../utils/ensure.js';
 import { withRetry } from '../utils/retry.js';
+import { log } from '../utils/logger.js';
 
 const DAY_VALUES = [1, 2, 3, 4, 5, 6, 0]; // ISO weekday to JS day
 
@@ -652,6 +653,10 @@ export function registerScheduleHandlers(bot) {
 
     // Force-create (skip conflict check)
     try {
+      // #48 Copy profile_id from medicine
+      const med = await getMedicine(state.medId);
+      const profileId = med?.profile_id || null;
+
       await withRetry(() => createSchedule({
         medicineId: state.medId,
         userId: ctx.dbUser.id,
@@ -663,6 +668,7 @@ export function registerScheduleHandlers(bot) {
         durationType: state.durationType,
         durationValue: state.durationType === 'until_date' ? state.durationValue : (state.durationValue || null),
         startDate: new Date().toISOString().split('T')[0],
+        profileId,
       }));
 
       await clearWizardState(ctx.dbUser.id);
@@ -676,7 +682,7 @@ export function registerScheduleHandlers(bot) {
         }
       );
     } catch (e) {
-      console.error('Error creating schedule (conflict override):', e);
+      log('error', { action: 'create_schedule_conflict_override', error: e.message });
       await ctx.editMessageText(
         ctx.t('schedule.create_error'),
         {
@@ -717,11 +723,15 @@ export function registerScheduleHandlers(bot) {
         return;
       }
     } catch (e) {
-      console.error('Error checking schedule conflicts:', e);
+      log('error', { action: 'check_schedule_conflicts', error: e.message });
       // Proceed with creation if conflict check fails
     }
 
     try {
+      // #48 Copy profile_id from medicine if it has one
+      const med = await getMedicine(state.medId);
+      const profileId = med?.profile_id || null;
+
       await withRetry(() => createSchedule({
         medicineId: state.medId,
         userId: ctx.dbUser.id,
@@ -733,6 +743,7 @@ export function registerScheduleHandlers(bot) {
         durationType: state.durationType,
         durationValue: state.durationType === 'until_date' ? state.durationValue : (state.durationValue || null),
         startDate: new Date().toISOString().split('T')[0],
+        profileId,
       }));
 
       await clearWizardState(ctx.dbUser.id);
@@ -746,7 +757,7 @@ export function registerScheduleHandlers(bot) {
         }
       );
     } catch (e) {
-      console.error('Error creating schedule:', e);
+      log('error', { action: 'create_schedule', error: e.message });
       await ctx.editMessageText(
         ctx.t('schedule.create_error'),
         {
@@ -767,7 +778,7 @@ export function registerScheduleHandlers(bot) {
         await showScheduleList(ctx, med.id);
       }
     } catch (e) {
-      console.error('Error resuming schedule from restock:', e);
+      log('error', { action: 'resume_schedule_restock', error: e.message });
       await ctx.answerCallbackQuery(ctx.t('schedule.error_generic'));
     }
   });
@@ -798,7 +809,7 @@ export function registerScheduleHandlers(bot) {
       const sched = await updateScheduleStatus(schedId, 'paused');
       await showScheduleList(ctx, sched.medicine_id);
     } catch (e) {
-      console.error('Error pausing schedule:', e);
+      log('error', { action: 'pause_schedule', error: e.message });
       await ctx.answerCallbackQuery(ctx.t('schedule.error_generic'));
     }
   });
@@ -811,7 +822,7 @@ export function registerScheduleHandlers(bot) {
       const sched = await updateScheduleStatus(schedId, 'active');
       await showScheduleList(ctx, sched.medicine_id);
     } catch (e) {
-      console.error('Error resuming schedule:', e);
+      log('error', { action: 'resume_schedule', error: e.message });
       await ctx.answerCallbackQuery(ctx.t('schedule.error_generic'));
     }
   });
@@ -844,7 +855,7 @@ export function registerScheduleHandlers(bot) {
       await deleteSchedule(schedId);
       await ctx.answerCallbackQuery(ctx.t('schedule.delete_toast'));
     } catch (e) {
-      console.error('Error deleting schedule:', e);
+      log('error', { action: 'delete_schedule', error: e.message });
       await ctx.answerCallbackQuery(ctx.t('schedule.error_generic'));
       return;
     }

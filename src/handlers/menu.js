@@ -3,6 +3,7 @@ import { getUserMedkits } from '../db/queries/medkits.js';
 import { countShoppingItems } from '../db/queries/shoppingList.js';
 import { getTodayIntakeLogs } from '../db/queries/intakeLogs.js';
 import { supabase } from '../db/supabase.js';
+import { getProfileDashboardLines } from './profiles.js';
 
 /**
  * Build profile completion data (#84)
@@ -175,6 +176,14 @@ async function buildDashboard(userId, settings, t, dbUser) {
     }
   }
 
+  // #51 Dashboard profile lines
+  try {
+    const profileLines = await getProfileDashboardLines(userId, t);
+    if (profileLines) {
+      text += '\n' + profileLines;
+    }
+  } catch { /* ignore profile dashboard errors */ }
+
   // Profile completion progress (#84)
   try {
     const { pct, criteria } = await getProfileCompletion(userId, dbUser);
@@ -196,7 +205,7 @@ export async function handleMainMenu(ctx) {
   const { text, hasAttention } = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings, ctx.t, ctx.dbUser);
   await ctx.reply(text, {
     parse_mode: 'Markdown',
-    reply_markup: mainMenuKeyboard(ctx.t, hasAttention),
+    reply_markup: mainMenuKeyboard(ctx.t, hasAttention, ctx.dbUser.settings),
   });
 }
 
@@ -208,6 +217,6 @@ export async function handleMainMenuCallback(ctx) {
   const { text, hasAttention } = await buildDashboard(ctx.dbUser.id, ctx.dbUser.settings, ctx.t, ctx.dbUser);
   await ctx.editMessageText(text, {
     parse_mode: 'Markdown',
-    reply_markup: mainMenuKeyboard(ctx.t, hasAttention),
+    reply_markup: mainMenuKeyboard(ctx.t, hasAttention, ctx.dbUser.settings),
   });
 }

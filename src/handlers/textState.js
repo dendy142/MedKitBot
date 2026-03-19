@@ -12,6 +12,7 @@ import { handleSettingsTextState } from './settings.js';
 import { handleQuickStartText } from './onboarding.js';
 import { handleProfileTextState } from './profiles.js';
 import { handleCourseTextState } from './courses.js';
+import { log } from '../utils/logger.js';
 
 async function getState(userId) {
   const { data } = await supabase
@@ -346,7 +347,7 @@ export async function handleTextState(ctx) {
         new InlineKeyboard().text(ctx.t('intake.btn_today'), 'intake_today').text(ctx.t('common.main_menu'), 'main_menu')
       );
     } catch (e) {
-      console.error('Error adding intake note:', e);
+      log('error', { action: 'intake_note', error: e.message });
       await editBotMsg(ctx, msgId,
         ctx.t('common.error'),
         new InlineKeyboard().text(ctx.t('intake.btn_today'), 'intake_today')

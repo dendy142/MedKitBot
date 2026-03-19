@@ -18,6 +18,7 @@ export async function createMedicine(data) {
       initial_quantity: data.quantity || 0,
       photo_file_ids: data.photoFileIds || [],
       notes: data.notes || null,
+      profile_id: data.profileId || null,
       is_favorite: false,
       is_archived: false,
       version: 1,

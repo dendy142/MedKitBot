@@ -16,6 +16,7 @@ export async function createSchedule(data) {
       frequency_days: data.frequencyDays || [],
       duration_type: data.durationType || 'indefinite',
       duration_value: data.durationValue || null,
+      profile_id: data.profileId || null,
       start_date: data.startDate || new Date().toISOString().split('T')[0],
       status: 'active',
     })

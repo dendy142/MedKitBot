@@ -3,6 +3,7 @@ import { Bot } from 'grammy';
 import { BOT_TOKEN, CRON_SECRET } from '../../src/config.js';
 import { t } from '../../src/locales/index.js';
 import { log } from '../../src/utils/logger.js';
+import { safeSend } from '../../src/utils/retry.js';
 
 export default async function handler(req, res) {
   // Verify cron secret
@@ -91,7 +92,7 @@ export default async function handler(req, res) {
       }
 
       try {
-        await bot.api.sendMessage(user.telegram_id, text, { parse_mode: 'Markdown' });
+        await safeSend(bot, user.telegram_id, text, { parse_mode: 'Markdown' });
         notified++;
 
         // Log notification
@@ -223,7 +224,7 @@ export default async function handler(req, res) {
 
               const keyboard = { inline_keyboard: buttons };
 
-              await bot.api.sendMessage(
+              await safeSend(bot,
                 user.telegram_id,
                 msgText,
                 { reply_markup: keyboard, parse_mode: 'Markdown' }

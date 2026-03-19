@@ -119,7 +119,7 @@ export async function getIntakeLogsForPeriod(userId, startDate, endDate, medicin
 export async function getPendingIntakeLogs(beforeTime) {
   const { data } = await supabase
     .from('intake_logs')
-    .select('*, medicines(name, dosage, notes), schedules(dose_per_intake), users(telegram_id, timezone, settings)')
+    .select('*, medicines(name, dosage, notes, profile_id), schedules(dose_per_intake), users(telegram_id, timezone, settings)')
     .eq('status', 'pending')
     .lte('planned_at', beforeTime)
     .order('planned_at', { ascending: true });

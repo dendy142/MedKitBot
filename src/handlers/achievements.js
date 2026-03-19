@@ -1,6 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { ACHIEVEMENTS } from '../config.js';
 import { supabase } from '../db/supabase.js';
+import { log } from '../utils/logger.js';
 
 /**
  * Get all unlocked achievements for a user (from action_logs)
@@ -145,7 +146,7 @@ export async function checkAchievements(ctx, action, extra = {}) {
       }
     }
   } catch (e) {
-    console.error('Error checking achievements:', e);
+    log('error', { action: 'check_achievements', error: e.message });
   }
 }
 

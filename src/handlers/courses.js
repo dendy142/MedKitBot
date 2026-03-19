@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { supabase } from '../db/supabase.js';
 import { getUserMedkits } from '../db/queries/medkits.js';
 import { getMedkitMedicines } from '../db/queries/medicines.js';
+import { log } from '../utils/logger.js';
 
 /**
  * Get user's courses
@@ -51,10 +52,10 @@ async function showCoursesList(ctx) {
   const courses = await getUserCourses(ctx.dbUser.id);
   const keyboard = new InlineKeyboard();
 
-  let text = '📋 *Курсы лечения*\n\n';
+  let text = ctx.t('course.list_title');
 
   if (courses.length === 0) {
-    text += '_Нет созданных курсов._\n';
+    text += ctx.t('course.list_empty');
   } else {
     for (const c of courses) {
       const statusEmoji = c.status === 'active' ? '▶️' : c.status === 'completed' ? '✅' : '⏸';
@@ -89,13 +90,13 @@ async function showCourseDetail(ctx, courseId) {
   let text = `${statusEmoji} ${ctx.t('course.title', { name: course.name })}\n\n`;
 
   if (medicines.length === 0) {
-    text += '_Нет привязанных лекарств._\n';
+    text += ctx.t('course.no_medicines');
   } else {
-    text += '💊 *Лекарства:*\n';
+    text += ctx.t('course.medicines_header');
     for (const cm of medicines) {
       const med = cm.medicines;
       if (med) {
-        text += `  • ${med.name}${med.dosage ? ' ' + med.dosage : ''}\n`;
+        text += ctx.t('course.medicine_item', { name: med.name, dosage: med.dosage ? ' ' + med.dosage : '' });
       }
     }
   }
@@ -110,13 +111,13 @@ async function showCourseDetail(ctx, courseId) {
     keyboard.text(ctx.t('course.btn_complete'), `course:${courseId}:complete`);
     keyboard.row();
   } else if (course.status === 'paused') {
-    keyboard.text('▶️ Возобновить', `course:${courseId}:activate`);
+    keyboard.text(ctx.t('course.btn_resume'), `course:${courseId}:activate`);
     keyboard.text(ctx.t('course.btn_complete'), `course:${courseId}:complete`);
     keyboard.row();
   }
 
-  keyboard.text('➕ Добавить лекарства', `course:${courseId}:addmeds`).row();
-  keyboard.text('🗑 Удалить курс', `course:${courseId}:delete`).row();
+  keyboard.text(ctx.t('course.btn_add_medicines'), `course:${courseId}:addmeds`).row();
+  keyboard.text(ctx.t('course.btn_delete'), `course:${courseId}:delete`).row();
   keyboard.text(ctx.t('common.back'), 'courses');
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -191,9 +192,9 @@ export function registerCourseHandlers(bot) {
         course_id: courseId,
         medicine_id: medicineId,
       }, { onConflict: 'course_id,medicine_id' });
-      await ctx.answerCallbackQuery('✅ Добавлено');
+      await ctx.answerCallbackQuery(ctx.t('course.added_toast'));
     } catch (e) {
-      console.error('Error linking medicine to course:', e);
+      log('error', { action: 'link_medicine_course', error: e.message });
       await ctx.answerCallbackQuery(ctx.t('common.error'));
     }
   });
@@ -204,7 +205,8 @@ export function registerCourseHandlers(bot) {
     await ctx.answerCallbackQuery();
     const medicines = await getCourseMedicines(courseId);
 
-    let text = '📆 *Расписания курса:*\n\n';
+    let text = ctx.t('course.schedules_title');
+    let hasSchedules = false;
     for (const cm of medicines) {
       const med = cm.medicines;
       if (!med) continue;
@@ -216,16 +218,17 @@ export function registerCourseHandlers(bot) {
         .eq('status', 'active');
 
       if (scheds && scheds.length > 0) {
-        text += `💊 *${med.name}*\n`;
+        hasSchedules = true;
+        text += ctx.t('course.schedule_med_title', { name: med.name });
         for (const s of scheds) {
-          text += `  ⏰ ${s.time_value} — ${s.dose_per_intake} ${med.quantity_unit || 'шт'}\n`;
+          text += ctx.t('course.schedule_item', { time: s.time_value, dose: s.dose_per_intake, unit: med.quantity_unit || 'шт' });
         }
         text += '\n';
       }
     }
 
-    if (text === '📆 *Расписания курса:*\n\n') {
-      text += '_Нет активных расписаний._\n';
+    if (!hasSchedules) {
+      text += ctx.t('course.no_schedules');
     }
 
     await ctx.editMessageText(text, {
@@ -319,17 +322,17 @@ export async function handleCourseTextState(state, text, ctx) {
       .single();
 
     if (error) {
-      console.error('Error creating course:', error);
+      log('error', { action: 'create_course', error: error.message });
       return null;
     }
 
     const keyboard = new InlineKeyboard()
-      .text('➕ Добавить лекарства', `course:${course.id}:addmeds`)
+      .text(ctx.t('course.btn_add_medicines'), `course:${course.id}:addmeds`)
       .row()
       .text(ctx.t('common.back'), 'courses');
 
     await ctx.api.editMessageText(ctx.chat.id, state.msgId,
-      `✅ Курс *«${name}»* создан!\n\nДобавьте лекарства к курсу:`,
+      ctx.t('course.created', { name }),
       { parse_mode: 'Markdown', reply_markup: keyboard }
     );
 

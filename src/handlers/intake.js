@@ -7,6 +7,7 @@ import { supabase } from '../db/supabase.js';
 import { formatQuantity } from '../utils/format.js';
 import { checkAchievements, calculateCurrentStreak } from './achievements.js';
 import { withRetry } from '../utils/retry.js';
+import { log } from '../utils/logger.js';
 
 function formatTime(plannedAt) {
   const d = new Date(plannedAt);
@@ -40,7 +41,7 @@ async function checkAutoShoppingList(ctx, med, newQty) {
       await ctx.api.sendMessage(ctx.chat.id, ctx.t('cron.auto_added_shop', { name: med.name }), { parse_mode: 'Markdown' });
     } catch { /* ignore */ }
   } catch (e) {
-    console.error('Error in auto-shopping list check:', e);
+    log('error', { action: 'auto_shopping_check', error: e.message });
   }
 }
 
@@ -106,6 +107,9 @@ async function buildTodayView(ctx, userId, timezone) {
       text += '\n';
       if (log.status === 'pending' || log.status === 'snoozed') {
         keyboard.text(`✅ ${name}`, `intake:${log.id}:take`).text('❌', `intake:${log.id}:skip`).row();
+      } else if (log.status === 'taken') {
+        // #57 Note button for taken intakes
+        keyboard.text(`📝 ${name}`, `intake:${log.id}:note`).row();
       }
     }
     text += '\n';
@@ -249,7 +253,7 @@ export function registerIntakeHandlers(bot) {
       const log = await markIntakeTaken(logId);
       await subtractDoseAndAutoPause(ctx, log);
       await ctx.answerCallbackQuery(ctx.t('yesterday.marked_toast'));
-    } catch (e) { console.error('Error marking yesterday intake taken:', e); await ctx.answerCallbackQuery(ctx.t('intake.taken_error')); return; }
+    } catch (e) { log('error', { action: 'mark_yesterday_taken', error: e.message }); await ctx.answerCallbackQuery(ctx.t('intake.taken_error')); return; }
     const { text, keyboard } = await buildYesterdayView(ctx, ctx.dbUser.id);
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
   });
@@ -277,7 +281,7 @@ export function registerIntakeHandlers(bot) {
       return ctx.answerCallbackQuery({ text: ctx.t('common.already_taken'), show_alert: false });
     }
     try { const log = await withRetry(() => markIntakeTaken(logId)); await subtractDoseAndAutoPause(ctx, log); await ctx.answerCallbackQuery(ctx.t('intake.taken_toast')); }
-    catch (e) { console.error('Error marking intake taken:', e); await ctx.answerCallbackQuery(ctx.t('intake.taken_error')); return; }
+    catch (e) { log('error', { action: 'mark_intake_taken', error: e.message }); await ctx.answerCallbackQuery(ctx.t('intake.taken_error')); return; }
     // #91 Streak congratulations + #90 achievements
     try {
       const timezone = ctx.dbUser.timezone || 'Europe/Moscow';
@@ -300,11 +304,18 @@ export function registerIntakeHandlers(bot) {
     if (!existingSkip || existingSkip.status === 'taken' || existingSkip.status === 'skipped') {
       return ctx.answerCallbackQuery({ text: ctx.t('common.already_taken'), show_alert: false });
     }
-    try { await markIntakeSkipped(logId); await ctx.answerCallbackQuery(ctx.t('intake.skipped_toast')); }
-    catch (e) { console.error('Error marking intake skipped:', e); await ctx.answerCallbackQuery(ctx.t('intake.skipped_error')); return; }
-    const timezone = ctx.dbUser.timezone || 'Europe/Moscow';
-    const { text, keyboard } = await buildTodayView(ctx, ctx.dbUser.id, timezone);
-    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    try { await markIntakeSkipped(logId); }
+    catch (e) { log('error', { action: 'mark_intake_skipped', error: e.message }); await ctx.answerCallbackQuery(ctx.t('intake.skipped_error')); return; }
+    // #58 Show skip reason picker
+    await ctx.answerCallbackQuery(ctx.t('intake.skipped_toast'));
+    const skipKb = new InlineKeyboard()
+      .text(ctx.t('profile.skip_reason_forgot'), `intake:${logId}:reason:forgot`).row()
+      .text(ctx.t('profile.skip_reason_sick'), `intake:${logId}:reason:sick`).row()
+      .text(ctx.t('profile.skip_reason_empty'), `intake:${logId}:reason:empty`).row()
+      .text(ctx.t('profile.skip_reason_doctor'), `intake:${logId}:reason:doctor`).row()
+      .text(ctx.t('profile.skip_reason_other'), `intake:${logId}:reason:other`).row()
+      .text(ctx.t('common.skip'), 'intake_today');
+    await ctx.editMessageText(ctx.t('profile.skip_reason_title'), { parse_mode: 'Markdown', reply_markup: skipKb });
   });
   bot.callbackQuery(/^intake:([0-9a-f-]+):note$/, async (ctx) => {
     const logId = ctx.match[1];
@@ -315,22 +326,22 @@ export function registerIntakeHandlers(bot) {
   bot.callbackQuery(/^intake:([0-9a-f-]+):snooze$/, async (ctx) => {
     const logId = ctx.match[1];
     try { const { snoozeIntake } = await import('../db/queries/intakeLogs.js'); await snoozeIntake(logId); await ctx.answerCallbackQuery(ctx.t('intake.snoozed_toast')); await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.snoozed_label'), { parse_mode: 'Markdown' }); }
-    catch (e) { console.error('Error snoozing intake:', e); await ctx.answerCallbackQuery(ctx.t('intake.skipped_error')); }
+    catch (e) { log('error', { action: 'snooze_intake', error: e.message }); await ctx.answerCallbackQuery(ctx.t('intake.skipped_error')); }
   });
   bot.callbackQuery(/^intake:([0-9a-f-]+):take_remind$/, async (ctx) => {
     const logId = ctx.match[1];
     try { const log = await markIntakeTaken(logId); await subtractDoseAndAutoPause(ctx, log); await ctx.answerCallbackQuery(ctx.t('intake.taken_toast')); await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.taken_label'), { parse_mode: 'Markdown' }); }
-    catch (e) { console.error('Error marking intake taken from reminder:', e); await ctx.answerCallbackQuery(ctx.t('intake.skipped_error')); }
+    catch (e) { log('error', { action: 'mark_intake_taken_reminder', error: e.message }); await ctx.answerCallbackQuery(ctx.t('intake.skipped_error')); }
   });
   bot.callbackQuery(/^intake:batch_take:(.+)$/, async (ctx) => {
     const logIds = ctx.match[1].split(',');
-    for (const logId of logIds) { try { const log = await markIntakeTaken(logId); await subtractDoseAndAutoPause(ctx, log); } catch (e) { console.error(`Error batch take (${logId}):`, e); } }
+    for (const logId of logIds) { try { const log = await markIntakeTaken(logId); await subtractDoseAndAutoPause(ctx, log); } catch (e) { log('error', { action: 'batch_take', logId, error: e.message }); } }
     await ctx.answerCallbackQuery(ctx.t('intake.taken_toast'));
     try { await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.taken_label'), { parse_mode: 'Markdown' }); } catch { /* ignore */ }
   });
   bot.callbackQuery(/^intake:([0-9a-f-]+):skip_remind$/, async (ctx) => {
     const logId = ctx.match[1];
     try { await markIntakeSkipped(logId); await ctx.answerCallbackQuery(ctx.t('intake.skipped_toast')); await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.skipped_label'), { parse_mode: 'Markdown' }); }
-    catch (e) { console.error('Error skipping intake from reminder:', e); await ctx.answerCallbackQuery(ctx.t('intake.skipped_error')); }
+    catch (e) { log('error', { action: 'skip_intake_reminder', error: e.message }); await ctx.answerCallbackQuery(ctx.t('intake.skipped_error')); }
   });
 }

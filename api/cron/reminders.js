@@ -5,6 +5,7 @@ import { getPendingIntakeLogs, createIntakeLog } from '../../src/db/queries/inta
 import { getUserActiveSchedules } from '../../src/db/queries/schedules.js';
 import { t } from '../../src/locales/index.js';
 import { log } from '../../src/utils/logger.js';
+import { safeSend } from '../../src/utils/retry.js';
 
 /**
  * Get user's local "now" and "today" in their timezone
@@ -267,7 +268,12 @@ export default async function handler(req, res) {
             let text = t('cron.reminder_grouped', lang);
             const logIds = [];
             for (const logEntry of logs) {
-              const medName = logEntry.medicines?.name || t('cron.reminder_medicine', lang);
+              let medName = logEntry.medicines?.name || t('cron.reminder_medicine', lang);
+              // #48 Prepend profile name/icon if medicine has a profile
+              if (logEntry.medicines?.profile_id) {
+                const { data: prof } = await supabase.from('profiles').select('name, icon').eq('id', logEntry.medicines.profile_id).single();
+                if (prof) medName = `${prof.icon} ${prof.name}: ${medName}`;
+              }
               const dose = logEntry.schedules?.dose_per_intake || 1;
               const unit = '';
               text += t('cron.reminder_grouped_item', lang, { name: `${medName}${logEntry.medicines?.dosage ? ' ' + logEntry.medicines.dosage : ''}`, dose, unit });
@@ -278,7 +284,7 @@ export default async function handler(req, res) {
               .text(t('cron.btn_take_all', lang), `intake:batch_take:${logIds.join(',')}`)
               .text(t('cron.btn_details', lang), 'intake_today');
 
-            await bot.api.sendMessage(telegramId, text, {
+            await safeSend(bot, telegramId, text, {
               parse_mode: 'Markdown',
               reply_markup: keyboard,
             });
@@ -291,7 +297,12 @@ export default async function handler(req, res) {
           } else {
             // Single notification (original behavior)
             const logEntry = logs[0];
-            const medName = logEntry.medicines?.name || t('cron.reminder_medicine', lang);
+            let medName = logEntry.medicines?.name || t('cron.reminder_medicine', lang);
+            // #48 Prepend profile name/icon if medicine has a profile
+            if (logEntry.medicines?.profile_id) {
+              const { data: prof } = await supabase.from('profiles').select('name, icon').eq('id', logEntry.medicines.profile_id).single();
+              if (prof) medName = `${prof.icon} ${prof.name}: ${medName}`;
+            }
             const dose = logEntry.schedules?.dose_per_intake || 1;
             const medNotes = logEntry.medicines?.notes;
 
@@ -306,7 +317,7 @@ export default async function handler(req, res) {
               .text(t('cron.btn_snooze', lang), `intake:${logEntry.id}:snooze`)
               .text(t('cron.btn_skip', lang), `intake:${logEntry.id}:skip_remind`);
 
-            await bot.api.sendMessage(telegramId, text, {
+            await safeSend(bot, telegramId, text, {
               parse_mode: 'Markdown',
               reply_markup: keyboard,
             });

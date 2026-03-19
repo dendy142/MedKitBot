@@ -44,6 +44,7 @@ export const DEFAULT_SETTINGS = {
     default_sort: 'name',
     date_format: 'DD.MM.YYYY',
   },
+  menuLayout: 'default',
 };
 
 // Preset medicine categories
@@ -67,6 +68,12 @@ export const DOSAGE_UNITS = [
   { value: 'мкг', label: 'мкг' },
   { value: 'МЕ', label: 'МЕ' },
   { value: '%', label: '%' },
+  { value: 'капли', label: 'Капли' },
+  { value: 'впрыскивания', label: 'Впрыскивания' },
+  { value: 'пластыри', label: 'Пластыри' },
+  { value: 'пакетики', label: 'Пакетики' },
+  { value: 'мерные ложки', label: 'Мерные ложки' },
+  { value: 'суппозитории', label: 'Суппозитории' },
   { value: 'другое', label: 'Другое' },
 ];
 

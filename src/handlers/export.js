@@ -160,59 +160,90 @@ async function handleCsvExport(ctx, target) {
 }
 
 /**
- * #97 Handle PDF export — generates a formatted text file with table layout
- * (pdfkit cannot render Cyrillic without a TTF font; we send a .txt document)
+ * #97 Handle PDF export — generates actual PDF using pdfkit.
+ * Uses built-in Courier font (Cyrillic may not render — noted in caption).
  */
 async function handlePdfExport(ctx, target) {
   const result = await gatherMedicines(ctx, target);
   if (!result) {
+    await ctx.answerCallbackQuery(ctx.t('addmed.medkit_not_found'));
     return;
   }
 
   const { allMedicines, exportName, medkitName } = result;
 
   if (allMedicines.length === 0) {
+    await ctx.answerCallbackQuery(ctx.t('export_import.export_no_medicines'));
     await ctx.editMessageText(ctx.t('export_import.export_empty'), {
       reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'export'),
     });
     return;
   }
 
-  // Build formatted text document (Cyrillic-friendly fallback)
+  const PDFDocument = (await import('pdfkit')).default;
   const dateFormat = ctx.dbUser.settings?.display?.date_format || 'DD.MM.YYYY';
   const now = new Date();
   const generatedDate = formatDate(now, dateFormat);
 
-  let content = `╔══════════════════════════════════════════════════╗\n`;
-  content += `║  ${ctx.t('pdf.header', { name: medkitName }).padEnd(48)}║\n`;
-  content += `╚══════════════════════════════════════════════════╝\n\n`;
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  const chunks = [];
+  doc.on('data', (chunk) => chunks.push(chunk));
+
+  // Title
+  doc.font('Courier-Bold').fontSize(16);
+  doc.text(`Medkit: ${medkitName}`, { align: 'center' });
+  doc.moveDown(0.5);
 
   // Table header
-  const colName = ctx.t('pdf.col_name').padEnd(20);
-  const colDosage = ctx.t('pdf.col_dosage').padEnd(12);
-  const colCategory = ctx.t('pdf.col_category').padEnd(16);
-  const colExpiry = ctx.t('pdf.col_expiry').padEnd(12);
-  const colQty = ctx.t('pdf.col_quantity').padEnd(8);
-  content += `${colName}${colDosage}${colCategory}${colExpiry}${colQty}\n`;
-  content += `${'─'.repeat(68)}\n`;
+  doc.font('Courier-Bold').fontSize(9);
+  const colX = [40, 190, 270, 350, 430];
+  const headers = ['Name', 'Dosage', 'Category', 'Expiry', 'Qty'];
+  headers.forEach((h, i) => {
+    doc.text(h, colX[i], doc.y, { continued: i < headers.length - 1, width: colX[i + 1] ? colX[i + 1] - colX[i] : 100 });
+  });
+  doc.moveDown(0.3);
+  doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke();
+  doc.moveDown(0.3);
 
+  // Table rows
+  doc.font('Courier').fontSize(8);
   for (const m of allMedicines) {
-    const name = (m.name || '').substring(0, 19).padEnd(20);
-    const dosage = (m.dosage || '—').substring(0, 11).padEnd(12);
-    const category = (m.category || '—').substring(0, 15).padEnd(16);
-    const expiry = m.expiry_date ? formatExpiryForCsv(m.expiry_date).padEnd(12) : '—'.padEnd(12);
-    const qty = String(m.quantity || 0).padEnd(8);
-    content += `${name}${dosage}${category}${expiry}${qty}\n`;
+    const y = doc.y;
+    if (y > 750) {
+      doc.addPage();
+    }
+    const row = [
+      (m.name || '').substring(0, 22),
+      (m.dosage || '-').substring(0, 12),
+      (m.category || '-').substring(0, 12),
+      m.expiry_date ? formatExpiryForCsv(m.expiry_date) : '-',
+      String(m.quantity || 0),
+    ];
+    const rowY = doc.y;
+    row.forEach((cell, i) => {
+      doc.text(cell, colX[i], rowY, { width: (colX[i + 1] || 555) - colX[i], lineBreak: false });
+    });
+    doc.y = rowY + 14;
   }
 
-  content += `${'─'.repeat(68)}\n`;
-  content += `\n${ctx.t('pdf.footer', { date: generatedDate })}\n`;
+  // Footer
+  doc.moveDown(1);
+  doc.font('Courier').fontSize(8);
+  doc.text(`Generated ${generatedDate} - @my_med_kit_bot`, 40, doc.y, { align: 'center' });
 
-  const buffer = Buffer.from('\ufeff' + content, 'utf-8');
-  const inputFile = new InputFile(buffer, `${exportName}_${Date.now()}.txt`);
+  doc.end();
 
+  // Wait for stream to finish
+  const pdfBuffer = await new Promise((resolve) => {
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+  });
+
+  const inputFile = new InputFile(pdfBuffer, `${exportName}_${Date.now()}.pdf`);
+
+  await ctx.answerCallbackQuery();
   await ctx.replyWithDocument(inputFile, {
-    caption: ctx.t('export_import.export_done', { count: allMedicines.length }),
+    caption: ctx.t('export_import.export_done', { count: allMedicines.length }) + '\n\n' +
+      'Note: PDF uses Courier font. Cyrillic characters may not render correctly in the PDF.',
   });
 }
 
@@ -274,8 +305,23 @@ async function handleBackupExport(ctx) {
       timezone: ctx.dbUser.timezone,
       settings: ctx.dbUser.settings || DEFAULT_SETTINGS,
     },
+    profiles: [],
     medkits: [],
   };
+
+  // #100 Include profiles
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('user_id', ctx.dbUser.id);
+
+  backup.profiles = (profiles || []).map(p => ({
+    name: p.name,
+    icon: p.icon,
+    birth_year: p.birth_year,
+    tags: p.tags,
+    is_default: p.is_default,
+  }));
 
   for (const mk of medkits) {
     const medicines = await getMedkitMedicines(mk.id);
@@ -368,6 +414,40 @@ export function registerExportHandlers(bot) {
   bot.callbackQuery('backup:export', async (ctx) => {
     await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
     await handleBackupExport(ctx);
+  });
+
+  // #63 Export filtered by profile
+  bot.callbackQuery(/^export:profile:(all|general|[0-9a-f-]+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: ctx.t('common.loading') });
+    const profileVal = ctx.match[1];
+
+    // Gather all medicines from all medkits, then filter by profile
+    const medkits = await getUserMedkits(ctx.dbUser.id);
+    let allMedicines = [];
+    for (const mk of medkits) {
+      const meds = await getMedkitMedicines(mk.id);
+      allMedicines.push(...meds);
+    }
+
+    if (profileVal === 'general') {
+      allMedicines = allMedicines.filter(m => !m.profile_id);
+    } else if (profileVal !== 'all') {
+      allMedicines = allMedicines.filter(m => m.profile_id === profileVal);
+    }
+
+    if (allMedicines.length === 0) {
+      await ctx.editMessageText(ctx.t('export_import.export_empty'), {
+        reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'export'),
+      });
+      return;
+    }
+
+    const csvContent = generateCsv(allMedicines, ctx);
+    const buffer = Buffer.from('\ufeff' + csvContent, 'utf-8');
+    const inputFile = new InputFile(buffer, `profile_export_${Date.now()}.csv`);
+    await ctx.replyWithDocument(inputFile, {
+      caption: ctx.t('export_import.export_done', { count: allMedicines.length }),
+    });
   });
 
   // Legacy: direct export:ID still works (defaults to CSV)

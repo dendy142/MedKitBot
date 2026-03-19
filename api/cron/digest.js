@@ -5,6 +5,8 @@ import { InlineKeyboard } from 'grammy';
 import { t } from '../../src/locales/index.js';
 import { pluralize } from '../../src/utils/format.js';
 import { log } from '../../src/utils/logger.js';
+import { safeSend } from '../../src/utils/retry.js';
+import { awardAchievementSilent } from '../../src/handlers/achievements.js';
 
 export default async function handler(req, res) {
   // Verify cron secret
@@ -57,6 +59,20 @@ export default async function handler(req, res) {
             inactiveReminders++;
           } catch (e) {
             log('error', { cron: 'digest', action: 'inactive_reminder', userId: user.id, error: e.message });
+          }
+        }
+
+        // ─── #90 month_with_bot achievement ─────────────────────
+        if (user.created_at) {
+          try {
+            const createdAt = new Date(user.created_at);
+            const daysSinceCreation = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+            if (daysSinceCreation >= 30) {
+              const tBound = (key, params) => t(key, lang, params);
+              await awardAchievementSilent(user.id, 'month_with_bot', bot, user.telegram_id, tBound);
+            }
+          } catch (e) {
+            log('error', { cron: 'digest', action: 'month_with_bot', userId: user.id, error: e.message });
           }
         }
 
@@ -178,7 +194,7 @@ export default async function handler(req, res) {
           .text(t('menu.btn_medkits', lang), 'medkits')
           .text(t('menu.btn_intake', lang), 'intake_today');
 
-        await bot.api.sendMessage(user.telegram_id, text, {
+        await safeSend(bot, user.telegram_id, text, {
           parse_mode: 'Markdown',
           reply_markup: keyboard,
         });
@@ -241,7 +257,7 @@ async function sendTipIfNeeded(bot, user, lang, now) {
   if (tipText === `onboarding.${tipKey}`) return; // Key not found
 
   try {
-    await bot.api.sendMessage(user.telegram_id, tipText);
+    await safeSend(bot, user.telegram_id, tipText);
 
     await supabase.from('action_logs').insert({
       user_id: user.id,
@@ -293,7 +309,7 @@ async function sendInactiveReminderIfNeeded(bot, user, lang, now) {
   const count = pendingCount || activeScheds;
 
   try {
-    await bot.api.sendMessage(
+    await safeSend(bot,
       user.telegram_id,
       t('cron.inactive_reminder', lang, { count })
     );

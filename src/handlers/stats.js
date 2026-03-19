@@ -268,6 +268,8 @@ async function showStatsMenu(ctx) {
     .text(ctx.t('stats.btn_month'), 'stats:month')
     .text(ctx.t('stats.btn_all'), 'stats:all')
     .row()
+    .text(ctx.t('profile.btn_by_profile'), 'stats:by_profile')
+    .row()
     .text(ctx.t('common.back'), 'main_menu');
 
   if (ctx.callbackQuery) {

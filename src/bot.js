@@ -21,6 +21,7 @@ import { registerStatsHandlers } from './handlers/stats.js';
 import { registerCourseHandlers } from './handlers/courses.js';
 import { registerSearchHandlers } from './handlers/search.js';
 import { registerAchievementHandlers, checkAchievements } from './handlers/achievements.js';
+import { registerProfileHandlers } from './handlers/profiles.js';
 import { clearUserSessions } from './utils/sessions.js';
 import { log } from './utils/logger.js';
 import { createMedicine } from './db/queries/medicines.js';
@@ -243,6 +244,9 @@ export function createBot() {
     }
   });
 
+  // Profile handlers (Wave 3: Family Profiles) — before addmed: since that regex is broad
+  registerProfileHandlers(bot);
+
   // Add medicine callbacks
   bot.callbackQuery(/^addmed:/, async (ctx) => {
     const action = ctx.callbackQuery.data;
@@ -295,20 +299,23 @@ export function createBot() {
   });
 
   // #64 Improved error handler with structured logging & friendly user message
-  // #68 Telegram rate limit handling
-  bot.catch((err) => {
+  // #68 Telegram rate limit handling with actual sleep+retry
+  bot.catch(async (err) => {
     const errObj = err.error ?? err;
     const userId = err.ctx?.from?.id;
 
-    // #68 Detect Telegram 429 rate limit
+    // #68 Detect Telegram 429 rate limit — sleep and retry the friendly message
     if (errObj?.error_code === 429) {
-      const retryAfter = errObj?.parameters?.retry_after ?? errObj?.retry_after ?? '?';
+      const retryAfter = errObj?.parameters?.retry_after ?? errObj?.retry_after ?? 5;
       log('warn', {
         action: 'telegram_rate_limit',
         userId,
         retryAfter,
         error: errObj.description || errObj.message,
       });
+      // Sleep for the required duration then retry sending the friendly message
+      await new Promise((r) => setTimeout(r, (typeof retryAfter === 'number' ? retryAfter : 5) * 1000));
+      err.ctx?.reply(err.ctx?.t?.('common.error_generic_msg') || '\u26a0\ufe0f Error').catch(() => {});
     } else {
       // #64 Structured error log
       log('error', {
@@ -317,10 +324,9 @@ export function createBot() {
         error: errObj?.message || String(errObj),
         stack: errObj?.stack,
       });
+      // #64 Send friendly message to user, never raw errors
+      err.ctx?.reply(err.ctx?.t?.('common.error_generic_msg') || '\u26a0\ufe0f Error').catch(() => {});
     }
-
-    // #64 Send friendly message to user, never raw errors
-    err.ctx?.reply(err.ctx?.t?.('common.error_generic_msg') || '\u26a0\ufe0f Error').catch(() => {});
   });
 
   return bot;

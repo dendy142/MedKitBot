@@ -157,7 +157,7 @@ export default async function handler(req, res) {
             .eq('id', userId)
             .single();
 
-          if (!user || !user.settings?.notifications?.low_stock) continue;
+          if (!user || !user.settings?.notifications?.low_stock_alerts) continue;
 
           const thresholds = user.settings?.thresholds || {};
           const lowCount = thresholds.low_stock_count || 5;

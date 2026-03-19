@@ -243,7 +243,7 @@ async function handlePdfExport(ctx, target) {
   await ctx.answerCallbackQuery();
   await ctx.replyWithDocument(inputFile, {
     caption: ctx.t('export_import.export_done', { count: allMedicines.length }) + '\n\n' +
-      'Note: PDF uses Courier font. Cyrillic characters may not render correctly in the PDF.',
+      ctx.t('export_import.pdf_font_note'),
   });
 }
 

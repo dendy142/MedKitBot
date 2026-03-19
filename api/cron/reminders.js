@@ -275,7 +275,7 @@ export default async function handler(req, res) {
                 if (prof) medName = `${prof.icon} ${prof.name}: ${medName}`;
               }
               const dose = logEntry.schedules?.dose_per_intake || 1;
-              const unit = '';
+              const unit = logEntry.medicines?.quantity_unit || '';
               text += t('cron.reminder_grouped_item', lang, { name: `${medName}${logEntry.medicines?.dosage ? ' ' + logEntry.medicines.dosage : ''}`, dose, unit });
               logIds.push(logEntry.id);
             }
@@ -308,7 +308,7 @@ export default async function handler(req, res) {
 
             let text = t('cron.reminder_title', lang);
             text += `${medName}${logEntry.medicines?.dosage ? ' ' + logEntry.medicines.dosage : ''}\n`;
-            text += t('cron.reminder_dose', lang, { dose, unit: '' }) + '\n';
+            text += t('cron.reminder_dose', lang, { dose, unit: logEntry.medicines?.quantity_unit || '' }) + '\n';
 
             if (medNotes) text += t('cron.reminder_notes', lang, { notes: medNotes }) + '\n';
 

@@ -40,7 +40,7 @@ export default async function handler(req, res) {
       try {
         const settings = user.settings;
         const lang = settings?.language || 'ru';
-        const timezone = user.timezone || 'Etc/GMT-3';
+        const timezone = user.timezone || 'Europe/Moscow';
 
         // ─── Feature tips (#83) ───────────────────────────────
         if (settings?.showTips !== false) {

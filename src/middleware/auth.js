@@ -49,23 +49,15 @@ export function authMiddleware() {
       if (user.username !== ctx.from.username) updates.username = ctx.from.username || null;
       if (user.first_name !== ctx.from.first_name) updates.first_name = ctx.from.first_name || null;
 
-      const promises = [
-        // Check if user completed onboarding (has at least one medkit)
-        supabase
-          .from('medkit_members')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id),
-        // Update username/first_name/last_active_at (#89)
-        supabase
-          .from('users')
-          .update(updates)
-          .eq('id', user.id),
-      ];
-      // #66 Session cleanup — run probabilistically (~5% of requests) to avoid unnecessary DB call
-      if (Math.random() < 0.05) {
-        promises.push(cleanExpiredSessions(user.id));
-      }
-      const [memberResult] = await Promise.all(promises);
+      // Fire-and-forget non-critical updates (don't block the request)
+      supabase.from('users').update(updates).eq('id', user.id).then(() => {}, () => {});
+      if (Math.random() < 0.05) cleanExpiredSessions(user.id);
+
+      // Only await the critical onboarding check
+      const memberResult = await supabase
+        .from('medkit_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
       ctx.isNewUser = memberResult.count === 0;
     }
 

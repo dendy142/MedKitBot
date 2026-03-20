@@ -64,7 +64,7 @@ export function createBot() {
     try { await ctx.answerCallbackQuery(); } catch {}
   });
 
-  // #95 Set bot commands on startup
+  // #95 Set bot commands — fire-and-forget, runs once per container cold start
   bot.api.setMyCommands([
     { command: 'start', description: 'Главное меню' },
     { command: 'menu', description: 'Мои аптечки' },
@@ -73,33 +73,33 @@ export function createBot() {
     { command: 'search', description: 'Поиск лекарства' },
     { command: 'help', description: 'Помощь' },
     { command: 'settings', description: 'Настройки' },
-  ]).catch(e => log('error', { action: 'set_bot_commands', error: e.message }));
+  ]).catch(() => {});
 
-  // #77 Commands clear active sessions before handling
+  // #77 Commands clear active sessions before handling (fire-and-forget for speed)
   bot.command('start', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
     await handleStart(ctx);
   });
   bot.command('help', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
     await handleHelp(ctx);
   });
   bot.command('cancel', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
     await handleMainMenu(ctx);
   });
 
   // #95 /menu command
   bot.command('menu', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
-    try { await ctx.deleteMessage(); } catch { /* ignore */ }
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
+    ctx.deleteMessage().catch(() => {});
     await handleMainMenu(ctx);
   });
 
   // #96 /today command — direct access to today's intakes
   bot.command('today', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
-    try { await ctx.deleteMessage(); } catch { /* ignore */ }
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
+    ctx.deleteMessage().catch(() => {});
     const msg = await ctx.reply(ctx.t('common.loading'), {
       reply_markup: new InlineKeyboard().text(ctx.t('menu.btn_intake_today'), 'intake_today'),
     });
@@ -107,8 +107,8 @@ export function createBot() {
 
   // #94 /quick command — fast medicine addition
   bot.command('quick', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
-    try { await ctx.deleteMessage(); } catch { /* ignore */ }
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
+    ctx.deleteMessage().catch(() => {});
 
     const input = ctx.match?.trim();
 
@@ -170,8 +170,10 @@ export function createBot() {
       quantityUnit: 'шт',
     });
 
-    await logAction(ctx.dbUser.id, 'create', 'medicine', medicine.id, { name });
-    await checkAchievements(ctx, 'medicine_added');
+    await Promise.all([
+      logAction(ctx.dbUser.id, 'create', 'medicine', medicine.id, { name }),
+      checkAchievements(ctx, 'medicine_added'),
+    ]);
 
     const details = [];
     if (dosage) details.push(ctx.t('quick.detail_dosage', { value: dosage }));
@@ -193,8 +195,8 @@ export function createBot() {
 
   // #95 /search command
   bot.command('search', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
-    try { await ctx.deleteMessage(); } catch { /* ignore */ }
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
+    ctx.deleteMessage().catch(() => {});
     await ctx.reply(ctx.t('search.prompt'), {
       parse_mode: 'Markdown',
       reply_markup: new InlineKeyboard().text(ctx.t('common.back'), 'main_menu'),
@@ -203,8 +205,8 @@ export function createBot() {
 
   // #95 /settings command
   bot.command('settings', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
-    try { await ctx.deleteMessage(); } catch { /* ignore */ }
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
+    ctx.deleteMessage().catch(() => {});
     await ctx.reply(ctx.t('common.loading'), {
       reply_markup: new InlineKeyboard().text(ctx.t('menu.btn_settings'), 'settings'),
     });
@@ -212,7 +214,7 @@ export function createBot() {
 
   // Also clear sessions when going to main menu via callback
   bot.callbackQuery('main_menu', async (ctx) => {
-    await clearUserSessions(ctx.dbUser?.id);
+    clearUserSessions(ctx.dbUser?.id).catch(() => {});
     await handleMainMenuCallback(ctx);
   });
 
@@ -247,9 +249,11 @@ export function createBot() {
         quantity: 0,
         quantityUnit: 'шт',
       });
-      await logAction(ctx.dbUser.id, 'create', 'medicine', medicine.id, { name: state.name });
-      await supabase.from('sessions').delete().eq('key', `state:${ctx.dbUser.id}`);
-      await checkAchievements(ctx, 'medicine_added');
+      await Promise.all([
+        logAction(ctx.dbUser.id, 'create', 'medicine', medicine.id, { name: state.name }),
+        supabase.from('sessions').delete().eq('key', `state:${ctx.dbUser.id}`),
+        checkAchievements(ctx, 'medicine_added'),
+      ]);
       await ctx.editMessageText(
         ctx.t('quick_start.success', { name: state.name }),
         {

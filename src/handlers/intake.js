@@ -62,20 +62,33 @@ async function getIntakeLogsForDate(userId, date) {
 
 async function subtractDoseAndAutoPause(ctx, log) {
   if (!log.medicine_id) return;
-  const med = await getMedicine(log.medicine_id);
+  // Parallelize independent DB fetches
+  const [med, schedule] = await Promise.all([
+    getMedicine(log.medicine_id),
+    log.schedule_id ? getSchedule(log.schedule_id) : null,
+  ]);
   if (!med) return;
-  const schedule = log.schedule_id ? await getSchedule(log.schedule_id) : null;
   const dose = schedule?.dose_per_intake || 1;
   const newQty = Math.max(0, med.quantity - dose);
-  await updateMedicine(log.medicine_id, { quantity: newQty });
-  await checkAutoShoppingList(ctx, med, newQty);
+  // Parallelize medicine update and auto-shopping check
+  const updatePromises = [
+    updateMedicine(log.medicine_id, { quantity: newQty }),
+    checkAutoShoppingList(ctx, med, newQty),
+  ];
   if (newQty <= 0) {
-    const { data: activeScheds } = await supabase.from('schedules').select('id').eq('medicine_id', log.medicine_id).eq('status', 'active');
-    if (activeScheds && activeScheds.length > 0) {
-      await supabase.from('schedules').update({ status: 'paused' }).in('id', activeScheds.map(s => s.id));
-      try { await ctx.api.sendMessage(ctx.chat.id, ctx.t('schedule.auto_pause', { name: med.name, count: activeScheds.length })); } catch { /* ignore */ }
-    }
+    updatePromises.push(
+      supabase.from('schedules').select('id').eq('medicine_id', log.medicine_id).eq('status', 'active')
+        .then(({ data: activeScheds }) => {
+          if (activeScheds && activeScheds.length > 0) {
+            return Promise.all([
+              supabase.from('schedules').update({ status: 'paused' }).in('id', activeScheds.map(s => s.id)),
+              ctx.api.sendMessage(ctx.chat.id, ctx.t('schedule.auto_pause', { name: med.name, count: activeScheds.length })).catch(() => {}),
+            ]);
+          }
+        })
+    );
   }
+  await Promise.all(updatePromises);
 }
 
 async function buildTodayView(ctx, userId, timezone) {
@@ -335,7 +348,7 @@ export function registerIntakeHandlers(bot) {
   });
   bot.callbackQuery(/^intake:batch_take:(.+)$/, async (ctx) => {
     const logIds = ctx.match[1].split(',');
-    for (const logId of logIds) { try { const log = await markIntakeTaken(logId); await subtractDoseAndAutoPause(ctx, log); } catch (e) { log('error', { action: 'batch_take', logId, error: e.message }); } }
+    await Promise.all(logIds.map(async (logId) => { try { const log = await markIntakeTaken(logId); await subtractDoseAndAutoPause(ctx, log); } catch (e) { log('error', { action: 'batch_take', logId, error: e.message }); } }));
     await ctx.answerCallbackQuery(ctx.t('intake.taken_toast'));
     try { await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n' + ctx.t('intake.taken_label'), { parse_mode: 'Markdown' }); } catch { /* ignore */ }
   });

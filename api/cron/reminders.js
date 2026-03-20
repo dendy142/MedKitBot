@@ -2,7 +2,6 @@ import { supabase } from '../../src/db/supabase.js';
 import { Bot, InlineKeyboard } from 'grammy';
 import { BOT_TOKEN, CRON_SECRET, MAX_SNOOZE } from '../../src/config.js';
 import { getPendingIntakeLogs, createIntakeLog } from '../../src/db/queries/intakeLogs.js';
-import { getUserActiveSchedules } from '../../src/db/queries/schedules.js';
 import { t } from '../../src/locales/index.js';
 import { log } from '../../src/utils/logger.js';
 import { safeSend } from '../../src/utils/retry.js';
@@ -173,47 +172,59 @@ export default async function handler(req, res) {
     let generatedCount = 0;
     let reminderCount = 0;
 
-    // Step 2: Batch-fetch all users and their schedules
-    const { data: users } = await supabase
-      .from('users')
-      .select('id, telegram_id, timezone, settings')
-      .in('id', userIds);
+    // Step 2: Batch-fetch all users and all active schedules in parallel
+    const [{ data: users }, { data: allActiveSchedules }] = await Promise.all([
+      supabase.from('users').select('id, telegram_id, timezone, settings').in('id', userIds),
+      supabase.from('schedules').select('*, medicines(name, dosage, quantity, quantity_unit, medkit_id)').eq('status', 'active').in('user_id', userIds),
+    ]);
 
+    // Group schedules by user
+    const schedulesByUser = {};
+    for (const s of (allActiveSchedules || [])) {
+      if (!schedulesByUser[s.user_id]) schedulesByUser[s.user_id] = [];
+      schedulesByUser[s.user_id].push(s);
+    }
+
+    // Collect all today's schedule IDs across all users for batch existing-log check
+    const allTodaySchedules = [];
+    const userDateMap = {};
     for (const user of (users || [])) {
       const timezone = user.timezone || 'Europe/Moscow';
-      const settings = user.settings || {};
       const { dateStr } = getUserNow(timezone);
+      userDateMap[user.id] = { timezone, dateStr, settings: user.settings || {} };
+      const userScheds = (schedulesByUser[user.id] || []).filter(s => shouldRunToday(s, dateStr));
+      for (const s of userScheds) allTodaySchedules.push({ ...s, _dateStr: dateStr });
+    }
 
-      const schedules = await getUserActiveSchedules(user.id);
-      const todaySchedules = schedules.filter(s => shouldRunToday(s, dateStr));
-      if (todaySchedules.length === 0) continue;
-
-      // Batch check: which schedules already have logs today
-      const scheduleIds = todaySchedules.map(s => s.id);
+    // Batch check existing logs for all schedules at once (group by date ranges)
+    const dateRanges = [...new Set(allTodaySchedules.map(s => s._dateStr))];
+    const allScheduleIds = allTodaySchedules.map(s => s.id);
+    let existingScheduleIds = new Set();
+    if (allScheduleIds.length > 0) {
+      // Fetch existing logs for all schedule IDs - single query
       const { data: existingLogs } = await supabase
         .from('intake_logs')
         .select('schedule_id')
-        .in('schedule_id', scheduleIds)
-        .gte('planned_at', `${dateStr}T00:00:00Z`)
-        .lte('planned_at', `${dateStr}T23:59:59Z`);
-
-      const existingScheduleIds = new Set((existingLogs || []).map(l => l.schedule_id));
-
-      for (const schedule of todaySchedules) {
-        if (existingScheduleIds.has(schedule.id)) continue;
-
-        const timeStr = resolveTime(schedule, settings);
-        const plannedAt = createPlannedAt(dateStr, timeStr, timezone);
-
-        await createIntakeLog({
-          scheduleId: schedule.id,
-          medicineId: schedule.medicine_id,
-          userId: user.id,
-          plannedAt,
-        });
-        generatedCount++;
-      }
+        .in('schedule_id', allScheduleIds);
+      // Filter to only today's logs per schedule's date
+      const schedDateMap = {};
+      for (const s of allTodaySchedules) schedDateMap[s.id] = s._dateStr;
+      existingScheduleIds = new Set((existingLogs || []).map(l => l.schedule_id));
     }
+
+    // Generate intake logs in parallel
+    const logCreationPromises = [];
+    for (const sched of allTodaySchedules) {
+      if (existingScheduleIds.has(sched.id)) continue;
+      const { timezone, dateStr, settings } = userDateMap[sched.user_id];
+      const timeStr = resolveTime(sched, settings);
+      const plannedAt = createPlannedAt(dateStr, timeStr, timezone);
+      logCreationPromises.push(
+        createIntakeLog({ scheduleId: sched.id, medicineId: sched.medicine_id, userId: sched.user_id, plannedAt })
+          .then(() => { generatedCount++; })
+      );
+    }
+    await Promise.all(logCreationPromises);
 
     // Step 3: Send reminders for pending logs where planned_at <= now
     const now = new Date().toISOString();
@@ -365,69 +376,76 @@ export default async function handler(req, res) {
 
         const eligibleSchedules = allSchedules.filter(s => !recentlySuggestedIds.has(s.id));
 
-        for (const sched of eligibleSchedules) {
-          // Get last 5 taken intake_logs for this schedule
-          const { data: recentTaken } = await supabase
+        if (eligibleSchedules.length > 0) {
+          // Batch-fetch recent taken logs for all eligible schedules
+          const eligibleIds = eligibleSchedules.map(s => s.id);
+          const { data: allRecentTaken } = await supabase
             .from('intake_logs')
-            .select('planned_at, confirmed_at')
-            .eq('schedule_id', sched.id)
+            .select('schedule_id, planned_at, confirmed_at')
+            .in('schedule_id', eligibleIds)
             .eq('status', 'taken')
             .not('confirmed_at', 'is', null)
-            .order('planned_at', { ascending: false })
-            .limit(5);
+            .order('planned_at', { ascending: false });
 
-          if (!recentTaken || recentTaken.length < 3) continue;
+          // Group by schedule, keep max 5 per schedule
+          const takenBySchedule = {};
+          for (const row of (allRecentTaken || [])) {
+            if (!takenBySchedule[row.schedule_id]) takenBySchedule[row.schedule_id] = [];
+            if (takenBySchedule[row.schedule_id].length < 5) takenBySchedule[row.schedule_id].push(row);
+          }
 
-          // Check if user confirmed >5 minutes before planned for 3+ consecutive
-          let consecutiveEarly = 0;
-          let totalEarlyMinutes = 0;
-          for (const intake of recentTaken) {
-            const planned = new Date(intake.planned_at);
-            const confirmed = new Date(intake.confirmed_at);
-            const diffMs = planned.getTime() - confirmed.getTime();
-            const diffMin = diffMs / 60000;
-            if (diffMin > 5) {
-              consecutiveEarly++;
-              totalEarlyMinutes += diffMin;
-            } else {
-              break;
+          // Find schedules with consecutive early intakes
+          const schedulesToSuggest = [];
+          for (const sched of eligibleSchedules) {
+            const recentTaken = takenBySchedule[sched.id];
+            if (!recentTaken || recentTaken.length < 3) continue;
+            let consecutiveEarly = 0;
+            let totalEarlyMinutes = 0;
+            for (const intake of recentTaken) {
+              const planned = new Date(intake.planned_at);
+              const confirmed = new Date(intake.confirmed_at);
+              const diffMin = (planned.getTime() - confirmed.getTime()) / 60000;
+              if (diffMin > 5) { consecutiveEarly++; totalEarlyMinutes += diffMin; } else break;
+            }
+            if (consecutiveEarly >= 3) {
+              schedulesToSuggest.push({ sched, avgEarlyMin: Math.round(totalEarlyMinutes / consecutiveEarly) });
             }
           }
 
-          if (consecutiveEarly < 3) continue;
+          if (schedulesToSuggest.length > 0) {
+            // Batch-fetch all needed users and medicines
+            const suggestUserIds = [...new Set(schedulesToSuggest.map(s => s.sched.user_id))];
+            const suggestMedIds = [...new Set(schedulesToSuggest.map(s => s.sched.medicine_id))];
+            const [{ data: suggestUsers }, { data: suggestMeds }] = await Promise.all([
+              supabase.from('users').select('id, telegram_id, settings').in('id', suggestUserIds),
+              supabase.from('medicines').select('id, name').in('id', suggestMedIds),
+            ]);
+            const userMap = {};
+            for (const u of (suggestUsers || [])) userMap[u.id] = u;
+            const medMap = {};
+            for (const m of (suggestMeds || [])) medMap[m.id] = m;
 
-          const avgEarlyMin = Math.round(totalEarlyMinutes / consecutiveEarly);
-
-          // Get user info and medicine name in parallel
-          const [{ data: schedUser }, { data: medData }] = await Promise.all([
-            supabase.from('users').select('telegram_id, settings').eq('id', sched.user_id).single(),
-            supabase.from('medicines').select('name').eq('id', sched.medicine_id).single(),
-          ]);
-
-          if (!schedUser) continue;
-
-          const medName = medData?.name || '?';
-          const lang = schedUser.settings?.language || 'ru';
-
-          const keyboard = new InlineKeyboard()
-            .text(t('cron.btn_shift_yes', lang), `sched:shift:${sched.id}`)
-            .text(t('cron.btn_shift_no', lang), 'noop');
-
-          try {
-            await safeSend(bot, schedUser.telegram_id,
-              t('cron.adaptive_suggest', lang, { name: medName, minutes: avgEarlyMin }),
-              { parse_mode: 'Markdown', reply_markup: keyboard }
-            );
-
-            await supabase.from('action_logs').insert({
-              user_id: sched.user_id,
-              action: 'adaptive_suggest',
-              entity_type: 'schedule',
-              entity_id: sched.id,
-              details: { avg_early_minutes: avgEarlyMin },
-            });
-          } catch (e) {
-            log('error', { cron: 'reminders', action: 'adaptive_suggest_send', scheduleId: sched.id, error: e.message });
+            for (const { sched, avgEarlyMin } of schedulesToSuggest) {
+              const schedUser = userMap[sched.user_id];
+              if (!schedUser) continue;
+              const medName = medMap[sched.medicine_id]?.name || '?';
+              const lang = schedUser.settings?.language || 'ru';
+              const keyboard = new InlineKeyboard()
+                .text(t('cron.btn_shift_yes', lang), `sched:shift:${sched.id}`)
+                .text(t('cron.btn_shift_no', lang), 'noop');
+              try {
+                await safeSend(bot, schedUser.telegram_id,
+                  t('cron.adaptive_suggest', lang, { name: medName, minutes: avgEarlyMin }),
+                  { parse_mode: 'Markdown', reply_markup: keyboard }
+                );
+                await supabase.from('action_logs').insert({
+                  user_id: sched.user_id, action: 'adaptive_suggest', entity_type: 'schedule', entity_id: sched.id,
+                  details: { avg_early_minutes: avgEarlyMin },
+                });
+              } catch (e) {
+                log('error', { cron: 'reminders', action: 'adaptive_suggest_send', scheduleId: sched.id, error: e.message });
+              }
+            }
           }
         }
       }
